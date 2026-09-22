@@ -5,28 +5,21 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 type Application = {
-  id: string;
-  user_id: string;
-  job_id: string;
-  job_title: string | null;
-  applied_at: string | null;
+  id: number;
+  user_id: number | null;
+  job_id: number | null;
   status: string | null;
 };
 
-type Profile = {
-  user_id: string;
-  full_name: string | null;
-  email: string | null;
-  phone: string | null;
+type Job = {
+  id: number;
+  title: string | null;
   location: string | null;
-  desired_position: string | null;
-  years_experience: number | null;
-  resume_file_name: string | null;
-  resume_url: string | null;
+  salary: string | null;
 };
 
-type ApplicationWithProfile = Application & {
-  profile: Profile | null;
+type ApplicationWithJob = Application & {
+  job: Job | null;
 };
 
 export default function ApplicationsPage() {
@@ -34,7 +27,7 @@ export default function ApplicationsPage() {
   const supabase = createClient();
 
   const [applications, setApplications] = useState<
-    ApplicationWithProfile[]
+    ApplicationWithJob[]
   >([]);
 
   const [loading, setLoading] = useState(true);
@@ -42,26 +35,17 @@ export default function ApplicationsPage() {
   const [search, setSearch] = useState("");
 
   const [selectedApplication, setSelectedApplication] =
-    useState<ApplicationWithProfile | null>(null);
+    useState<ApplicationWithJob | null>(null);
 
   const [updating, setUpdating] = useState(false);
-  const [openingResume, setOpeningResume] = useState(false);
 
   useEffect(() => {
     loadApplications();
   }, []);
 
-  /*
-   * SUPABASE REALTIME
-   *
-   * Automatically reload applications when:
-   * - a new application is inserted
-   * - an application is updated
-   * - an application is deleted
-   */
   useEffect(() => {
-    const channel = supabase
-      .channel("applications-realtime")
+    const applicationChannel = supabase
+      .channel("applications-page-realtime")
       .on(
         "postgres_changes",
         {
@@ -75,8 +59,24 @@ export default function ApplicationsPage() {
       )
       .subscribe();
 
+    const jobsChannel = supabase
+      .channel("applications-jobs-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "jobs",
+        },
+        () => {
+          loadApplications();
+        }
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(applicationChannel);
+      supabase.removeChannel(jobsChannel);
     };
   }, []);
 
@@ -110,20 +110,25 @@ export default function ApplicationsPage() {
       return;
     }
 
+    /*
+      IMPORTANT:
+      Based on your database structure, we only request
+      columns that exist in applications.
+    */
+
     const {
       data: applicationData,
       error: applicationError,
     } = await supabase
       .from("applications")
-      .select(
-        "id, user_id, job_id, job_title, applied_at, status"
-      )
-      .order("applied_at", {
+      .select("id, user_id, job_id, status")
+      .order("id", {
         ascending: false,
       });
 
     if (applicationError) {
       setError(applicationError.message);
+      setApplications([]);
       setLoading(false);
       return;
     }
@@ -137,46 +142,52 @@ export default function ApplicationsPage() {
     }
 
     /*
-     * Applications and profiles do not have a database
-     * foreign-key relationship, so profiles are retrieved
-     * separately using the user IDs.
-     */
+      Get the job IDs used by applications.
+    */
 
-    const userIds = [
+    const jobIds = [
       ...new Set(
-        applicationRows.map(
-          (application) => application.user_id
-        )
+        applicationRows
+          .map((application) => application.job_id)
+          .filter((id): id is number => id !== null)
       ),
     ];
 
-    const { data: profileData, error: profileError } =
-      await supabase
-        .from("profiles")
-        .select(
-          "user_id, full_name, email, phone, location, desired_position, years_experience, resume_file_name, resume_url"
-        )
-        .in("user_id", userIds);
+    let jobs: Job[] = [];
 
-    if (profileError) {
-      setError(profileError.message);
-      setLoading(false);
-      return;
+    if (jobIds.length > 0) {
+      const {
+        data: jobData,
+        error: jobError,
+      } = await supabase
+        .from("jobs")
+        .select("id, title, location, salary")
+        .in("id", jobIds);
+
+      if (jobError) {
+        setError(jobError.message);
+        setApplications([]);
+        setLoading(false);
+        return;
+      }
+
+      jobs = jobData ?? [];
     }
 
-    const profiles = profileData ?? [];
+    /*
+      Combine applications with their jobs.
+    */
 
-    const combined: ApplicationWithProfile[] =
+    const combined: ApplicationWithJob[] =
       applicationRows.map((application) => {
-        const profile =
-          profiles.find(
-            (item) =>
-              item.user_id === application.user_id
+        const job =
+          jobs.find(
+            (item) => item.id === application.job_id
           ) ?? null;
 
         return {
           ...application,
-          profile,
+          job,
         };
       });
 
@@ -185,7 +196,7 @@ export default function ApplicationsPage() {
   }
 
   async function updateStatus(
-    applicationId: string,
+    applicationId: number,
     status: string
   ) {
     setUpdating(true);
@@ -234,81 +245,22 @@ export default function ApplicationsPage() {
     router.refresh();
   }
 
-  function formatDate(date: string | null) {
-    if (!date) {
-      return "—";
-    }
-
-    return new Date(date).toLocaleDateString("en-PH", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  }
-
-  function getStatusClass(status: string | null) {
+  function getStatusStyle(status: string | null) {
     const value = (status ?? "Pending").toLowerCase();
 
     if (value === "approved") {
-      return "bg-green-100 text-green-700";
+      return "border-green-200 bg-green-50 text-green-700";
     }
 
     if (value === "rejected") {
-      return "bg-red-100 text-red-700";
+      return "border-red-200 bg-red-50 text-red-700";
     }
 
     if (value === "reviewed") {
-      return "bg-blue-100 text-blue-700";
+      return "border-blue-200 bg-blue-50 text-blue-700";
     }
 
-    return "bg-yellow-100 text-yellow-700";
-  }
-
-  async function handleViewResume() {
-    const resumeUrl =
-      selectedApplication?.profile?.resume_url;
-
-    if (!resumeUrl) {
-      setError("No resume file is available for this applicant.");
-      return;
-    }
-
-    setOpeningResume(true);
-    setError("");
-
-    try {
-      let finalUrl = resumeUrl.trim();
-
-      /*
-       * If resume_url is already a complete URL,
-       * use it directly.
-       */
-      if (
-        !finalUrl.startsWith("http://") &&
-        !finalUrl.startsWith("https://")
-      ) {
-        /*
-         * Otherwise, treat resume_url as a path
-         * inside the public "resumes" bucket.
-         */
-        const { data } = supabase.storage
-          .from("resumes")
-          .getPublicUrl(finalUrl);
-
-        finalUrl = data.publicUrl;
-      }
-
-      window.open(
-        finalUrl,
-        "_blank",
-        "noopener,noreferrer"
-      );
-    } catch (err) {
-      console.error(err);
-      setError("Unable to open the resume.");
-    } finally {
-      setOpeningResume(false);
-    }
+    return "border-yellow-200 bg-yellow-50 text-yellow-700";
   }
 
   const filteredApplications = applications.filter(
@@ -319,97 +271,89 @@ export default function ApplicationsPage() {
         return true;
       }
 
-      const name =
-        application.profile?.full_name ?? "";
+      const userId = String(
+        application.user_id ?? ""
+      );
 
-      const email =
-        application.profile?.email ?? "";
+      const jobTitle =
+        application.job?.title ?? "";
 
-      const job =
-        application.job_title ?? "";
+      const location =
+        application.job?.location ?? "";
 
       const status =
         application.status ?? "";
 
       return (
-        name.toLowerCase().includes(searchText) ||
-        email.toLowerCase().includes(searchText) ||
-        job.toLowerCase().includes(searchText) ||
+        userId.toLowerCase().includes(searchText) ||
+        jobTitle.toLowerCase().includes(searchText) ||
+        location.toLowerCase().includes(searchText) ||
         status.toLowerCase().includes(searchText)
       );
     }
   );
 
   return (
-    <main className="min-h-screen bg-gray-100">
+    <main className="min-h-screen bg-[#f5f6f8] text-slate-900">
 
       {/* SIDEBAR */}
-      <aside className="fixed left-0 top-0 hidden h-screen w-64 bg-[#e30613] text-white lg:block">
+      <aside className="fixed left-0 top-0 z-20 hidden h-screen w-60 bg-[#e30613] text-white lg:flex lg:flex-col">
 
         {/* LOGO */}
-        <div className="flex h-20 items-center border-b border-white/20 px-6">
-          <div className="rounded-lg bg-white px-4 py-2">
-            <span className="text-2xl font-black text-[#e30613]">
-              MR.DIY
-            </span>
+        <div className="flex h-20 items-center border-b border-white/15 px-6">
+
+          <div className="flex h-14 w-44 items-center">
+
+            <img
+              src="/logo.png"
+              alt="MR.DIY"
+              className="h-auto w-full object-contain"
+            />
+
           </div>
+
         </div>
 
-        {/* NAVIGATION */}
-        <nav className="px-4 py-6">
+        {/* MENU */}
+        <nav className="flex-1 px-3 py-6">
 
-          {/* DASHBOARD */}
+          <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.15em] text-white/60">
+            Main Menu
+          </p>
+
           <button
             type="button"
             onClick={() => router.push("/dashboard")}
-            className="flex w-full items-center rounded-xl px-4 py-3 text-left font-medium transition hover:bg-white/10"
+            className="flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
-            <span className="mr-3 text-xl">
-              📊
-            </span>
-
             Dashboard
           </button>
 
-          {/* JOBS */}
           <button
             type="button"
             onClick={() => router.push("/jobs")}
-            className="mt-2 flex w-full items-center rounded-xl px-4 py-3 text-left font-medium transition hover:bg-white/10"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
-            <span className="mr-3 text-xl">
-              💼
-            </span>
-
             Jobs
           </button>
 
-          {/* APPLICATIONS */}
           <button
             type="button"
-            className="mt-2 flex w-full items-center rounded-xl bg-white/20 px-4 py-3 text-left font-semibold"
+            className="mt-1 flex w-full border-l-4 border-white bg-white/15 px-6 py-3 text-left text-sm font-semibold"
           >
-            <span className="mr-3 text-xl">
-              📋
-            </span>
-
             Applications
           </button>
 
         </nav>
 
         {/* LOGOUT */}
-        <div className="absolute bottom-0 left-0 right-0 border-t border-white/20 p-4">
+        <div className="border-t border-white/15 p-4">
 
           <button
             type="button"
             onClick={handleLogout}
-            className="flex w-full items-center rounded-xl px-4 py-3 text-left font-medium transition hover:bg-white/10"
+            className="flex w-full px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
-            <span className="mr-3 text-xl">
-              🚪
-            </span>
-
             Logout
           </button>
 
@@ -417,141 +361,149 @@ export default function ApplicationsPage() {
 
       </aside>
 
-      {/* MAIN CONTENT */}
-      <div className="lg:ml-64">
+      {/* MAIN */}
+      <div className="lg:ml-60">
 
-        {/* TOP BAR */}
-        <header className="sticky top-0 z-10 flex min-h-20 items-center border-b bg-white px-6 py-4 shadow-sm lg:px-8">
+        {/* HEADER */}
+        <header className="sticky top-0 z-10 flex min-h-20 items-center border-b border-slate-200 bg-white px-6 lg:px-8">
 
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
+
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+              MR.DIY Careers
+            </p>
+
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
               Applications
             </h1>
 
-            <p className="text-sm text-gray-500">
-              Review and manage job applications
-            </p>
           </div>
 
         </header>
 
         {/* CONTENT */}
-        <div className="p-6 lg:p-8">
+        <div className="p-5 sm:p-6 lg:p-8">
 
-          {/* HEADER */}
-          <div className="mb-6">
+          {/* INTRO */}
+          <section className="mb-7 border-b border-slate-200 pb-6">
 
-            <h2 className="text-xl font-bold text-gray-900">
-              Applicant Applications
-            </h2>
-
-            <p className="mt-1 text-sm text-gray-500">
-              {applications.length} application
-              {applications.length !== 1
-                ? "s"
-                : ""}{" "}
-              received
+            <p className="text-sm text-slate-500">
+              Review and manage applications submitted by candidates.
             </p>
 
-          </div>
+            <p className="mt-2 text-xs font-medium text-slate-400">
+              {applications.length} application
+              {applications.length !== 1 ? "s" : ""} received
+            </p>
+
+          </section>
 
           {/* ERROR */}
           {error && (
-            <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
+            <div className="mb-6 border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
               {error}
             </div>
           )}
 
           {/* SEARCH */}
-          <div className="mb-6 rounded-2xl bg-white p-4 shadow-sm">
+          <section className="mb-6 border border-slate-200 bg-white p-4 shadow-sm">
 
-            <div className="relative">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
-                🔍
-              </span>
+              <div>
 
-              <input
-                type="text"
-                value={search}
-                onChange={(event) =>
-                  setSearch(event.target.value)
-                }
-                placeholder="Search applicant, email, job, or status..."
-                className="w-full rounded-xl border border-gray-300 bg-white py-3 pl-11 pr-4 text-gray-900 outline-none transition focus:border-[#e30613] focus:ring-2 focus:ring-red-100"
-              />
+                <h2 className="text-base font-bold text-slate-900">
+                  Applicant Applications
+                </h2>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Search by applicant, position, location, or status.
+                </p>
+
+              </div>
+
+              <div className="w-full sm:max-w-sm">
+
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(event) =>
+                    setSearch(event.target.value)
+                  }
+                  placeholder="Search applications..."
+                  className="w-full border border-slate-300 bg-white px-4 py-2.5 text-sm outline-none placeholder:text-slate-400 focus:border-[#e30613]"
+                />
+
+              </div>
 
             </div>
 
-          </div>
+          </section>
 
-          {/* APPLICATIONS */}
-          <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
+          {/* APPLICATION TABLE */}
+          <section className="border border-slate-200 bg-white shadow-sm">
 
             {loading ? (
+
               <div className="flex min-h-64 items-center justify-center">
 
                 <div className="text-center">
 
-                  <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-gray-300 border-t-[#e30613]" />
+                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-[#e30613]" />
 
-                  <p className="mt-4 text-sm text-gray-500">
+                  <p className="mt-4 text-sm text-slate-500">
                     Loading applications...
                   </p>
 
                 </div>
 
               </div>
+
             ) : filteredApplications.length === 0 ? (
+
               <div className="px-6 py-16 text-center">
 
-                <div className="text-5xl">
-                  📋
-                </div>
-
-                <h3 className="mt-4 text-lg font-bold text-gray-900">
+                <h3 className="text-sm font-semibold text-slate-800">
                   {search
                     ? "No applications found"
                     : "No applications yet"}
                 </h3>
 
-                <p className="mt-2 text-sm text-gray-500">
+                <p className="mt-1 text-sm text-slate-500">
                   {search
-                    ? "Try a different search term."
-                    : "Applications from the mobile app will appear here."}
+                    ? "Try another search term."
+                    : "Applications submitted by users will appear here."}
                 </p>
 
               </div>
+
             ) : (
+
               <div className="overflow-x-auto">
 
-                <table className="w-full min-w-[1000px]">
+                <table className="w-full min-w-[900px] text-left">
 
-                  <thead className="bg-gray-50">
+                  <thead>
 
-                    <tr>
+                    <tr className="border-b border-slate-200 bg-slate-50">
 
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Applicant
                       </th>
 
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Job Applied
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Position
                       </th>
 
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Location
                       </th>
 
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Applied
-                      </th>
-
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Status
                       </th>
 
-                      <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Action
                       </th>
 
@@ -559,108 +511,85 @@ export default function ApplicationsPage() {
 
                   </thead>
 
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody>
 
                     {filteredApplications.map(
-                      (application) => {
+                      (application) => (
 
-                        const profile =
-                          application.profile;
+                        <tr
+                          key={application.id}
+                          className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                        >
 
-                        return (
-                          <tr
-                            key={application.id}
-                            className="transition hover:bg-gray-50"
-                          >
+                          {/* APPLICANT */}
+                          <td className="px-5 py-4">
 
-                            {/* APPLICANT */}
-                            <td className="px-6 py-5">
+                            <p className="text-sm font-semibold text-slate-800">
+                              User #{application.user_id ?? "—"}
+                            </p>
 
-                              <div>
+                            <p className="mt-1 font-mono text-xs text-slate-400">
+                              Application #{application.id}
+                            </p>
 
-                                <p className="font-bold text-gray-900">
-                                  {profile?.full_name ||
-                                    "Unknown Applicant"}
-                                </p>
+                          </td>
 
-                                <p className="mt-1 text-sm text-gray-500">
-                                  {profile?.email ||
-                                    "No email"}
-                                </p>
+                          {/* POSITION */}
+                          <td className="px-5 py-4">
 
-                              </div>
+                            <p className="max-w-xs text-sm font-medium text-slate-700">
+                              {application.job?.title ||
+                                `Job #${application.job_id ?? "—"}`}
+                            </p>
 
-                            </td>
+                          </td>
 
-                            {/* JOB */}
-                            <td className="px-6 py-5">
+                          {/* LOCATION */}
+                          <td className="px-5 py-4">
 
-                              <p className="font-semibold text-gray-800">
-                                {application.job_title ||
-                                  `Job #${application.job_id}`}
-                              </p>
+                            <p className="text-sm text-slate-600">
+                              {application.job?.location || "—"}
+                            </p>
 
-                            </td>
+                          </td>
 
-                            {/* LOCATION */}
-                            <td className="px-6 py-5">
+                          {/* STATUS */}
+                          <td className="px-5 py-4">
 
-                              <p className="text-sm text-gray-600">
-                                {profile?.location ||
-                                  "—"}
-                              </p>
+                            <span
+                              className={`inline-flex border px-2.5 py-1 text-[11px] font-semibold ${getStatusStyle(
+                                application.status
+                              )}`}
+                            >
+                              {application.status || "Pending"}
+                            </span>
 
-                            </td>
+                          </td>
 
-                            {/* DATE */}
-                            <td className="px-6 py-5">
+                          {/* ACTION */}
+                          <td className="px-5 py-4">
 
-                              <p className="text-sm text-gray-600">
-                                {formatDate(
-                                  application.applied_at
-                                )}
-                              </p>
+                            <div className="flex justify-end">
 
-                            </td>
-
-                            {/* STATUS */}
-                            <td className="px-6 py-5">
-
-                              <span
-                                className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${getStatusClass(
-                                  application.status
-                                )}`}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedApplication(
+                                    application
+                                  )
+                                }
+                                className="border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#e30613] hover:text-[#e30613]"
                               >
-                                {application.status ||
-                                  "Pending"}
-                              </span>
+                                View
+                              </button>
 
-                            </td>
+                            </div>
 
-                            {/* ACTION */}
-                            <td className="px-6 py-5">
+                          </td>
 
-                              <div className="flex justify-end">
+                        </tr>
 
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setSelectedApplication(
-                                      application
-                                    )
-                                  }
-                                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
-                                >
-                                  👁️ View
-                                </button>
-
-                              </div>
-
-                            </td>
-
-                          </tr>
-                        );
-                      }
+                      )
                     )}
 
                   </tbody>
@@ -668,32 +597,43 @@ export default function ApplicationsPage() {
                 </table>
 
               </div>
+
             )}
 
-          </div>
+          </section>
+
+          {/* FOOTER */}
+          <footer className="mt-8 border-t border-slate-200 pt-5">
+
+            <p className="text-xs text-slate-400">
+              MR.DIY Careers Administration
+            </p>
+
+          </footer>
 
         </div>
-
       </div>
 
-      {/* APPLICANT DETAILS MODAL */}
+      {/* APPLICATION DETAILS */}
       {selectedApplication && (
+
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-6">
 
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto bg-white shadow-2xl">
 
-            {/* MODAL HEADER */}
-            <div className="flex items-center justify-between border-b px-6 py-5">
+            {/* HEADER */}
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
 
               <div>
-                <h2 className="text-xl font-bold text-gray-900">
-                  Applicant Details
+
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                  MR.DIY Careers
+                </p>
+
+                <h2 className="mt-1 text-xl font-bold text-slate-900">
+                  Application Details
                 </h2>
 
-                <p className="mt-1 text-sm text-gray-500">
-                  Review the applicant information and
-                  application status.
-                </p>
               </div>
 
               <button
@@ -701,203 +641,118 @@ export default function ApplicationsPage() {
                 onClick={() =>
                   setSelectedApplication(null)
                 }
-                className="rounded-xl px-3 py-2 text-xl text-gray-500 hover:bg-gray-100"
+                className="flex h-9 w-9 items-center justify-center border border-slate-200 text-xl text-slate-500 hover:bg-slate-50"
               >
-                ✕
+                ×
               </button>
 
             </div>
 
-            {/* DETAILS */}
+            {/* CONTENT */}
             <div className="p-6">
 
-              {/* APPLICANT INFORMATION */}
-              <div className="rounded-2xl bg-gray-50 p-5">
+              <section className="border border-slate-200 p-5">
 
-                <h3 className="font-bold text-gray-900">
-                  Applicant Information
+                <h3 className="text-sm font-bold text-slate-900">
+                  Application Information
                 </h3>
 
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div className="mt-5 grid gap-5 sm:grid-cols-2">
 
                   <div>
-                    <p className="text-xs font-semibold uppercase text-gray-500">
-                      Full Name
+
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Application ID
                     </p>
 
-                    <p className="mt-1 text-sm font-medium text-gray-900">
-                      {selectedApplication.profile
-                        ?.full_name ||
-                        "—"}
+                    <p className="mt-1 font-mono text-sm text-slate-700">
+                      {selectedApplication.id}
                     </p>
+
                   </div>
 
                   <div>
-                    <p className="text-xs font-semibold uppercase text-gray-500">
-                      Email
+
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Applicant User ID
                     </p>
 
-                    <p className="mt-1 break-all text-sm font-medium text-gray-900">
-                      {selectedApplication.profile
-                        ?.email ||
-                        "—"}
+                    <p className="mt-1 text-sm font-medium text-slate-800">
+                      {selectedApplication.user_id ?? "—"}
                     </p>
+
                   </div>
 
                   <div>
-                    <p className="text-xs font-semibold uppercase text-gray-500">
-                      Phone
+
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Position
                     </p>
 
-                    <p className="mt-1 text-sm font-medium text-gray-900">
-                      {selectedApplication.profile
-                        ?.phone ||
-                        "—"}
+                    <p className="mt-1 text-sm font-medium text-slate-800">
+                      {selectedApplication.job?.title ||
+                        `Job #${selectedApplication.job_id ?? "—"}`}
                     </p>
+
                   </div>
 
                   <div>
-                    <p className="text-xs font-semibold uppercase text-gray-500">
+
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                       Location
                     </p>
 
-                    <p className="mt-1 text-sm font-medium text-gray-900">
-                      {selectedApplication.profile
-                        ?.location ||
-                        "—"}
+                    <p className="mt-1 text-sm font-medium text-slate-800">
+                      {selectedApplication.job?.location || "—"}
                     </p>
+
                   </div>
 
                   <div>
-                    <p className="text-xs font-semibold uppercase text-gray-500">
-                      Desired Position
+
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Salary
                     </p>
 
-                    <p className="mt-1 text-sm font-medium text-gray-900">
-                      {selectedApplication.profile
-                        ?.desired_position ||
-                        "—"}
+                    <p className="mt-1 text-sm font-medium text-slate-800">
+                      {selectedApplication.job?.salary || "—"}
                     </p>
+
                   </div>
 
                   <div>
-                    <p className="text-xs font-semibold uppercase text-gray-500">
-                      Years of Experience
+
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Status
                     </p>
 
-                    <p className="mt-1 text-sm font-medium text-gray-900">
-                      {selectedApplication.profile
-                        ?.years_experience ??
-                        "—"}
-                    </p>
-                  </div>
-
-                </div>
-
-              </div>
-
-              {/* APPLICATION */}
-              <div className="mt-5 rounded-2xl border border-gray-200 p-5">
-
-                <h3 className="font-bold text-gray-900">
-                  Application
-                </h3>
-
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
-
-                  <div>
-                    <p className="text-xs font-semibold uppercase text-gray-500">
-                      Job
-                    </p>
-
-                    <p className="mt-1 text-sm font-medium text-gray-900">
-                      {selectedApplication.job_title ||
-                        `Job #${selectedApplication.job_id}`}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold uppercase text-gray-500">
-                      Date Applied
-                    </p>
-
-                    <p className="mt-1 text-sm font-medium text-gray-900">
-                      {formatDate(
-                        selectedApplication.applied_at
-                      )}
-                    </p>
-                  </div>
-
-                </div>
-
-              </div>
-
-              {/* RESUME */}
-              <div className="mt-5 rounded-2xl border border-gray-200 p-5">
-
-                <div className="flex items-center justify-between gap-4">
-
-                  <div>
-                    <h3 className="font-bold text-gray-900">
-                      Resume
-                    </h3>
-
-                    {selectedApplication.profile
-                      ?.resume_file_name ? (
-                      <p className="mt-2 break-all text-sm text-gray-600">
-                        📄{" "}
-                        {
-                          selectedApplication.profile
-                            .resume_file_name
-                        }
-                      </p>
-                    ) : (
-                      <p className="mt-2 text-sm text-gray-500">
-                        No resume uploaded.
-                      </p>
-                    )}
-                  </div>
-
-                  {selectedApplication.profile
-                    ?.resume_url && (
-                    <button
-                      type="button"
-                      onClick={handleViewResume}
-                      disabled={openingResume}
-                      className="shrink-0 rounded-xl bg-[#e30613] px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    <span
+                      className={`mt-1 inline-flex border px-2.5 py-1 text-[11px] font-semibold ${getStatusStyle(
+                        selectedApplication.status
+                      )}`}
                     >
-                      {openingResume
-                        ? "Opening..."
-                        : "📄 View Resume"}
-                    </button>
-                  )}
+                      {selectedApplication.status ||
+                        "Pending"}
+                    </span>
+
+                  </div>
 
                 </div>
 
-                {!selectedApplication.profile
-                  ?.resume_url &&
-                  selectedApplication.profile
-                    ?.resume_file_name && (
-                    <p className="mt-3 rounded-lg bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
-                      Resume file name is available, but
-                      no resume URL was saved in the profile.
-                    </p>
-                  )}
-
-              </div>
+              </section>
 
               {/* STATUS */}
-              <div className="mt-5 rounded-2xl border border-gray-200 p-5">
+              <section className="mt-5 border border-slate-200 p-5">
 
-                <h3 className="font-bold text-gray-900">
-                  Application Status
+                <h3 className="text-sm font-bold text-slate-900">
+                  Update Status
                 </h3>
 
-                <p className="mt-1 text-sm text-gray-500">
-                  Update the application status below.
+                <p className="mt-1 text-sm text-slate-500">
+                  Select the current status of this application.
                 </p>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
 
                   <button
                     type="button"
@@ -908,9 +763,9 @@ export default function ApplicationsPage() {
                         "Pending"
                       )
                     }
-                    className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm font-semibold text-yellow-700 hover:bg-yellow-100 disabled:opacity-50"
+                    className="border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm font-semibold text-yellow-700 hover:bg-yellow-100 disabled:opacity-50"
                   >
-                    ⏳ Pending
+                    Pending
                   </button>
 
                   <button
@@ -922,9 +777,9 @@ export default function ApplicationsPage() {
                         "Reviewed"
                       )
                     }
-                    className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                    className="border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
                   >
-                    👁 Reviewed
+                    Reviewed
                   </button>
 
                   <button
@@ -936,9 +791,9 @@ export default function ApplicationsPage() {
                         "Approved"
                       )
                     }
-                    className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50"
+                    className="border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50"
                   >
-                    ✅ Approved
+                    Approved
                   </button>
 
                   <button
@@ -950,14 +805,14 @@ export default function ApplicationsPage() {
                         "Rejected"
                       )
                     }
-                    className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50 sm:col-span-3"
+                    className="border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
                   >
-                    ❌ Rejected
+                    Rejected
                   </button>
 
                 </div>
 
-              </div>
+              </section>
 
               {/* CLOSE */}
               <div className="mt-6 flex justify-end">
@@ -967,7 +822,7 @@ export default function ApplicationsPage() {
                   onClick={() =>
                     setSelectedApplication(null)
                   }
-                  className="rounded-xl border border-gray-300 px-5 py-3 font-semibold text-gray-700 hover:bg-gray-50"
+                  className="border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
                   Close
                 </button>
@@ -979,6 +834,7 @@ export default function ApplicationsPage() {
           </div>
 
         </div>
+
       )}
 
     </main>

@@ -8,9 +8,14 @@ type Application = {
   id: string;
   user_id: string;
   job_id: string;
-  job_title: string | null;
   applied_at: string | null;
   status: string | null;
+  job_title: string | null;
+};
+
+type Job = {
+  id: string;
+  title: string | null;
 };
 
 export default function DashboardPage() {
@@ -20,26 +25,18 @@ export default function DashboardPage() {
   const [totalJobs, setTotalJobs] = useState(0);
   const [totalApplications, setTotalApplications] = useState(0);
   const [pendingApplications, setPendingApplications] = useState(0);
-  const [approvedApplications, setApprovedApplications] =
-    useState(0);
+  const [approvedApplications, setApprovedApplications] = useState(0);
 
   const [recentApplications, setRecentApplications] =
     useState<Application[]>([]);
 
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     loadDashboard();
   }, []);
 
-  /*
-   * REALTIME
-   *
-   * Automatically refresh dashboard when:
-   * - a new application is created
-   * - an application status is updated
-   * - an application is deleted
-   */
   useEffect(() => {
     const applicationChannel = supabase
       .channel("dashboard-applications-realtime")
@@ -56,10 +53,6 @@ export default function DashboardPage() {
       )
       .subscribe();
 
-    /*
-     * Also listen for job changes so Total Jobs
-     * updates automatically.
-     */
     const jobsChannel = supabase
       .channel("dashboard-jobs-realtime")
       .on(
@@ -102,6 +95,7 @@ export default function DashboardPage() {
 
   async function loadDashboard() {
     setLoading(true);
+    setError("");
 
     const isAdmin = await checkAdmin();
 
@@ -110,59 +104,135 @@ export default function DashboardPage() {
       return;
     }
 
-    /*
-     * TOTAL JOBS
-     */
-    const { count: jobsCount, error: jobsError } =
-      await supabase
-        .from("jobs")
-        .select("*", {
-          count: "exact",
-          head: true,
-        });
+    /* ============================
+       TOTAL JOBS
+    ============================ */
 
-    if (!jobsError) {
+    const { count: jobsCount, error: jobsError } = await supabase
+      .from("jobs")
+      .select("*", {
+        count: "exact",
+        head: true,
+      });
+
+    if (jobsError) {
+      console.error("Jobs count error:", jobsError);
+    } else {
       setTotalJobs(jobsCount ?? 0);
     }
 
-    /*
-     * APPLICATIONS
-     */
+    /* ============================
+       APPLICATIONS
+    ============================ */
+
     const {
       data: applications,
       error: applicationsError,
     } = await supabase
       .from("applications")
-      .select(
-        "id, user_id, job_id, job_title, applied_at, status"
-      )
-      .order("applied_at", {
+      .select("id, user_id, job_id, status")
+      .order("id", {
         ascending: false,
       });
 
-    if (!applicationsError) {
-      const rows = applications ?? [];
-
-      setTotalApplications(rows.length);
-
-      setPendingApplications(
-        rows.filter(
-          (application) =>
-            (application.status ?? "Pending").toLowerCase() ===
-            "pending"
-        ).length
+    if (applicationsError) {
+      console.error(
+        "Applications loading error:",
+        applicationsError
       );
 
-      setApprovedApplications(
-        rows.filter(
-          (application) =>
-            (application.status ?? "").toLowerCase() ===
-            "approved"
-        ).length
-      );
-
-      setRecentApplications(rows.slice(0, 5));
+      setError(applicationsError.message);
+      setLoading(false);
+      return;
     }
+
+    const rows = applications ?? [];
+
+    /* ============================
+       GET JOB TITLES
+    ============================ */
+
+    const jobIds = [
+      ...new Set(
+        rows
+          .map((application) => application.job_id)
+          .filter(Boolean)
+      ),
+    ];
+
+    let jobs: Job[] = [];
+
+    if (jobIds.length > 0) {
+      const { data: jobsData, error: jobsError2 } =
+        await supabase
+          .from("jobs")
+          .select("id, title")
+          .in("id", jobIds);
+
+      if (jobsError2) {
+        console.error(
+          "Job titles loading error:",
+          jobsError2
+        );
+      } else {
+        jobs = (jobsData ?? []) as Job[];
+      }
+    }
+
+    const jobMap = new Map<string, string>();
+
+    jobs.forEach((job) => {
+      if (job.title) {
+        jobMap.set(job.id, job.title);
+      }
+    });
+
+    /* ============================
+       COMBINE APPLICATION DATA
+    ============================ */
+
+    const combinedApplications: Application[] =
+      rows.map((application) => ({
+        id: application.id,
+        user_id: application.user_id,
+        job_id: application.job_id,
+        applied_at: null,
+        status: application.status,
+        job_title:
+          jobMap.get(application.job_id) ??
+          null,
+      }));
+
+    /* ============================
+       APPLICATION COUNTS
+    ============================ */
+
+    setTotalApplications(rows.length);
+
+    setPendingApplications(
+      rows.filter(
+        (application) =>
+          (application.status ?? "Pending").toLowerCase() ===
+          "pending"
+      ).length
+    );
+
+    setApprovedApplications(
+      rows.filter(
+        (application) =>
+          (application.status ?? "").toLowerCase() ===
+          "approved"
+      ).length
+    );
+
+    /*
+     * Since the current applications table does not
+     * expose applied_at in the known schema, use the
+     * returned application order for recent records.
+     */
+    setRecentApplications(
+      combinedApplications.slice(0, 5)
+    );
 
     setLoading(false);
   }
@@ -174,343 +244,488 @@ export default function DashboardPage() {
     router.refresh();
   }
 
-  function formatDate(date: string | null) {
-    if (!date) {
-      return "—";
+  function getStatusStyle(status: string | null) {
+    const value = (status ?? "Pending").toLowerCase();
+
+    if (value === "approved") {
+      return "border-green-200 bg-green-50 text-green-700";
     }
 
-    return new Date(date).toLocaleDateString("en-PH", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
+    if (value === "rejected") {
+      return "border-red-200 bg-red-50 text-red-700";
+    }
+
+    if (value === "reviewed") {
+      return "border-blue-200 bg-blue-50 text-blue-700";
+    }
+
+    return "border-yellow-200 bg-yellow-50 text-yellow-700";
+  }
+
+  function formatStatus(status: string | null) {
+    if (!status) {
+      return "Pending";
+    }
+
+    return (
+      status.charAt(0).toUpperCase() +
+      status.slice(1).toLowerCase()
+    );
   }
 
   return (
-    <main className="min-h-screen bg-gray-100">
+    <main className="min-h-screen bg-[#f5f6f8] text-slate-900">
+      {/* =====================================
+          SIDEBAR
+      ====================================== */}
 
-      {/* SIDEBAR */}
-      <aside className="fixed left-0 top-0 hidden h-screen w-64 bg-[#e30613] text-white lg:block">
-
+      <aside className="fixed left-0 top-0 z-20 hidden h-screen w-60 bg-[#e30613] text-white lg:flex lg:flex-col">
         {/* LOGO */}
-        <div className="flex h-20 items-center border-b border-white/20 px-6">
-          <div className="rounded-lg bg-white px-4 py-2">
-            <span className="text-2xl font-black text-[#e30613]">
-              MR.DIY
-            </span>
+
+        <div className="flex h-20 items-center border-b border-white/15 px-6">
+          <div className="flex h-14 w-44 items-center">
+            <img
+              src="/logo.png"
+              alt="MR.DIY"
+              className="h-auto w-full object-contain"
+            />
           </div>
         </div>
 
         {/* NAVIGATION */}
-        <nav className="px-4 py-6">
+
+        <nav className="flex-1 px-3 py-6">
+          <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.15em] text-white/60">
+            Main Menu
+          </p>
 
           {/* DASHBOARD */}
+
           <button
             type="button"
-            className="flex w-full items-center rounded-xl bg-white/20 px-4 py-3 text-left font-semibold"
+            className="flex w-full border-l-4 border-white bg-white/15 px-6 py-3 text-left text-sm font-semibold"
           >
-            <span className="mr-3 text-xl">
-              📊
-            </span>
-
             Dashboard
           </button>
 
           {/* JOBS */}
+
           <button
             type="button"
             onClick={() => router.push("/jobs")}
-            className="mt-2 flex w-full items-center rounded-xl px-4 py-3 text-left font-medium transition hover:bg-white/10"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
-            <span className="mr-3 text-xl">
-              💼
-            </span>
-
             Jobs
           </button>
 
           {/* APPLICATIONS */}
+
           <button
             type="button"
             onClick={() => router.push("/applications")}
-            className="mt-2 flex w-full items-center rounded-xl px-4 py-3 text-left font-medium transition hover:bg-white/10"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
-            <span className="mr-3 text-xl">
-              📋
-            </span>
-
             Applications
           </button>
-
         </nav>
 
         {/* LOGOUT */}
-        <div className="absolute bottom-0 left-0 right-0 border-t border-white/20 p-4">
 
+        <div className="border-t border-white/15 p-4">
           <button
             type="button"
             onClick={handleLogout}
-            className="flex w-full items-center rounded-xl px-4 py-3 text-left font-medium transition hover:bg-white/10"
+            className="flex w-full px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
-            <span className="mr-3 text-xl">
-              🚪
-            </span>
-
             Logout
           </button>
-
         </div>
-
       </aside>
 
-      {/* MAIN */}
-      <div className="lg:ml-64">
+      {/* =====================================
+          MAIN
+      ====================================== */}
 
-        {/* TOP BAR */}
-        <header className="flex min-h-20 items-center border-b bg-white px-6 py-4 shadow-sm lg:px-8">
+      <div className="lg:ml-60">
+        {/* HEADER */}
 
+        <header className="sticky top-0 z-10 flex min-h-20 items-center border-b border-slate-200 bg-white px-6 lg:px-8">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+              MR.DIY Careers
+            </p>
+
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
               Dashboard
             </h1>
-
-            <p className="text-sm text-gray-500">
-              MR.DIY Careers Administration
-            </p>
           </div>
-
         </header>
 
         {/* CONTENT */}
-        <div className="p-6 lg:p-8">
 
-          {/* WELCOME */}
-          <div className="mb-8 rounded-3xl bg-[#e30613] p-7 text-white shadow-sm">
+        <div className="p-5 sm:p-6 lg:p-8">
+          {/* INTRO */}
 
-            <h2 className="text-3xl font-bold">
-              Welcome, Admin!
-            </h2>
-
-            <p className="mt-2 text-white/90">
-              Here's an overview of your recruitment system.
+          <section className="mb-7 border-b border-slate-200 pb-6">
+            <p className="text-sm text-slate-500">
+              Monitor job postings and application activity.
             </p>
+          </section>
 
-          </div>
+          {/* =====================================
+              OVERVIEW
+          ====================================== */}
 
-          {/* STAT CARDS */}
-          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <section>
+            <div className="mb-4">
+              <h2 className="text-lg font-bold text-slate-900">
+                Overview
+              </h2>
 
-            {/* TOTAL JOBS */}
-            <div className="rounded-2xl bg-white p-6 shadow-sm">
-
-              <div className="flex items-center justify-between">
-
-                <div>
-                  <p className="text-sm text-gray-500">
-                    Total Jobs
-                  </p>
-
-                  <p className="mt-2 text-4xl font-bold text-gray-900">
-                    {loading ? "—" : totalJobs}
-                  </p>
-                </div>
-
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-2xl">
-                  💼
-                </div>
-
-              </div>
-
+              <p className="mt-1 text-sm text-slate-500">
+                Current recruitment activity
+              </p>
             </div>
 
-            {/* TOTAL APPLICATIONS */}
-            <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {/* TOTAL JOBS */}
 
-              <div className="flex items-center justify-between">
+              <div className="border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Total Jobs
+                    </p>
 
-                <div>
-                  <p className="text-sm text-gray-500">
-                    Total Applications
-                  </p>
+                    <p className="mt-3 text-3xl font-bold text-slate-900">
+                      {loading ? "—" : totalJobs}
+                    </p>
+                  </div>
 
-                  <p className="mt-2 text-4xl font-bold text-gray-900">
-                    {loading ? "—" : totalApplications}
-                  </p>
+                  <span className="border border-red-100 bg-red-50 px-2.5 py-1 text-[10px] font-bold text-[#e30613]">
+                    JOBS
+                  </span>
                 </div>
 
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-2xl">
-                  📋
-                </div>
-
+                <button
+                  type="button"
+                  onClick={() => router.push("/jobs")}
+                  className="mt-5 text-xs font-semibold text-[#e30613] hover:underline"
+                >
+                  Manage jobs →
+                </button>
               </div>
 
-            </div>
+              {/* APPLICATIONS */}
 
-            {/* PENDING */}
-            <div className="rounded-2xl bg-white p-6 shadow-sm">
+              <div className="border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Applications
+                    </p>
 
-              <div className="flex items-center justify-between">
+                    <p className="mt-3 text-3xl font-bold text-slate-900">
+                      {loading
+                        ? "—"
+                        : totalApplications}
+                    </p>
+                  </div>
 
-                <div>
-                  <p className="text-sm text-gray-500">
-                    Pending
-                  </p>
-
-                  <p className="mt-2 text-4xl font-bold text-gray-900">
-                    {loading ? "—" : pendingApplications}
-                  </p>
+                  <span className="border border-blue-100 bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-700">
+                    ALL
+                  </span>
                 </div>
 
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-yellow-100 text-2xl">
-                  ⏳
-                </div>
-
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push("/applications")
+                  }
+                  className="mt-5 text-xs font-semibold text-[#e30613] hover:underline"
+                >
+                  View applications →
+                </button>
               </div>
 
-            </div>
+              {/* PENDING */}
 
-            {/* APPROVED */}
-            <div className="rounded-2xl bg-white p-6 shadow-sm">
+              <div className="border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Pending Review
+                    </p>
 
-              <div className="flex items-center justify-between">
+                    <p className="mt-3 text-3xl font-bold text-slate-900">
+                      {loading
+                        ? "—"
+                        : pendingApplications}
+                    </p>
+                  </div>
 
-                <div>
-                  <p className="text-sm text-gray-500">
-                    Approved
-                  </p>
-
-                  <p className="mt-2 text-4xl font-bold text-gray-900">
-                    {loading ? "—" : approvedApplications}
-                  </p>
+                  <span className="border border-yellow-100 bg-yellow-50 px-2.5 py-1 text-[10px] font-bold text-yellow-700">
+                    PENDING
+                  </span>
                 </div>
 
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-green-100 text-2xl">
-                  ✅
-                </div>
-
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push("/applications")
+                  }
+                  className="mt-5 text-xs font-semibold text-[#e30613] hover:underline"
+                >
+                  Review applications →
+                </button>
               </div>
 
+              {/* APPROVED */}
+
+              <div className="border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Approved
+                    </p>
+
+                    <p className="mt-3 text-3xl font-bold text-slate-900">
+                      {loading
+                        ? "—"
+                        : approvedApplications}
+                    </p>
+                  </div>
+
+                  <span className="border border-green-100 bg-green-50 px-2.5 py-1 text-[10px] font-bold text-green-700">
+                    APPROVED
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push("/applications")
+                  }
+                  className="mt-5 text-xs font-semibold text-[#e30613] hover:underline"
+                >
+                  View approved →
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* =====================================
+              QUICK ACTIONS
+          ====================================== */}
+
+          <section className="mt-8">
+            <div className="mb-4">
+              <h2 className="text-lg font-bold text-slate-900">
+                Quick Actions
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Frequently used recruitment management actions.
+              </p>
             </div>
 
-          </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {/* MANAGE JOBS */}
 
-          {/* RECENT APPLICATIONS */}
-          <div className="mt-8 overflow-hidden rounded-2xl bg-white shadow-sm">
+              <button
+                type="button"
+                onClick={() => router.push("/jobs")}
+                className="border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-[#e30613]"
+              >
+                <p className="text-sm font-bold text-slate-900">
+                  Manage Jobs
+                </p>
 
-            <div className="flex items-center justify-between border-b px-6 py-5">
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Create new positions, update job details,
+                  and manage current job postings.
+                </p>
 
+                <p className="mt-4 text-xs font-semibold text-[#e30613]">
+                  Open Jobs →
+                </p>
+              </button>
+
+              {/* APPLICATIONS */}
+
+              <button
+                type="button"
+                onClick={() =>
+                  router.push("/applications")
+                }
+                className="border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-[#e30613]"
+              >
+                <p className="text-sm font-bold text-slate-900">
+                  Review Applications
+                </p>
+
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Review applicants and update their
+                  application status.
+                </p>
+
+                <p className="mt-4 text-xs font-semibold text-[#e30613]">
+                  Open Applications →
+                </p>
+              </button>
+            </div>
+          </section>
+
+          {/* =====================================
+              RECENT APPLICATIONS
+          ====================================== */}
+
+          <section className="mt-8 border border-slate-200 bg-white shadow-sm">
+            {/* HEADER */}
+
+            <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">
+                <h2 className="text-lg font-bold text-slate-900">
                   Recent Applications
                 </h2>
 
-                <p className="mt-1 text-sm text-gray-500">
-                  Latest applications submitted by applicants.
+                <p className="mt-1 text-sm text-slate-500">
+                  Latest applications received by the recruitment
+                  system.
                 </p>
               </div>
 
               <button
                 type="button"
-                onClick={() => router.push("/applications")}
-                className="font-semibold text-[#e30613] hover:underline"
+                onClick={() =>
+                  router.push("/applications")
+                }
+                className="self-start border border-slate-300 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#e30613] hover:text-[#e30613] sm:self-auto"
               >
-                View All
+                View all
               </button>
-
             </div>
 
-            {loading ? (
-              <div className="px-6 py-16 text-center text-gray-500">
-                Loading applications...
-              </div>
-            ) : recentApplications.length === 0 ? (
-              <div className="px-6 py-16 text-center">
+            {/* ERROR */}
 
-                <div className="text-5xl">
-                  📋
-                </div>
-
-                <h3 className="mt-4 text-lg font-bold text-gray-900">
-                  No applications yet
-                </h3>
-
-                <p className="mt-2 text-sm text-gray-500">
-                  Applications will appear here when users apply
-                  for jobs.
+            {error && (
+              <div className="border-b border-red-200 bg-red-50 px-5 py-4">
+                <p className="text-sm text-red-700">
+                  {error}
                 </p>
-
-              </div>
-            ) : (
-              <div className="divide-y">
-
-                {recentApplications.map(
-                  (application) => (
-                    <div
-                      key={application.id}
-                      className="flex flex-col gap-3 px-6 py-5 transition hover:bg-gray-50 md:flex-row md:items-center md:justify-between"
-                    >
-
-                      <div>
-                        <p className="font-semibold text-gray-900">
-                          {application.job_title ||
-                            `Job #${application.job_id}`}
-                        </p>
-
-                        <p className="mt-1 text-sm text-gray-500">
-                          Application ID:{" "}
-                          {application.id}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-4">
-
-                        <span className="text-sm text-gray-500">
-                          {formatDate(
-                            application.applied_at
-                          )}
-                        </span>
-
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            (
-                              application.status ??
-                              "Pending"
-                            ).toLowerCase() === "approved"
-                              ? "bg-green-100 text-green-700"
-                              : (
-                                  application.status ??
-                                  "Pending"
-                                ).toLowerCase() ===
-                                "rejected"
-                              ? "bg-red-100 text-red-700"
-                              : (
-                                  application.status ??
-                                  "Pending"
-                                ).toLowerCase() ===
-                                "reviewed"
-                              ? "bg-blue-100 text-blue-700"
-                              : "bg-yellow-100 text-yellow-700"
-                          }`}
-                        >
-                          {application.status ||
-                            "Pending"}
-                        </span>
-
-                      </div>
-
-                    </div>
-                  )
-                )}
-
               </div>
             )}
 
-          </div>
+            {/* LOADING */}
 
+            {loading ? (
+              <div className="px-5 py-14 text-center">
+                <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-[#e30613]" />
+
+                <p className="mt-4 text-sm text-slate-500">
+                  Loading applications...
+                </p>
+              </div>
+            ) : recentApplications.length === 0 ? (
+              /* EMPTY */
+
+              <div className="px-5 py-14 text-center">
+                <h3 className="text-sm font-semibold text-slate-800">
+                  No applications recorded
+                </h3>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  New applicant submissions will appear here.
+                </p>
+              </div>
+            ) : (
+              /* TABLE */
+
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[700px] text-left">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50">
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Position
+                      </th>
+
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Applicant
+                      </th>
+
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Application ID
+                      </th>
+
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {recentApplications.map(
+                      (application) => (
+                        <tr
+                          key={application.id}
+                          className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                        >
+                          {/* POSITION */}
+
+                          <td className="px-5 py-4">
+                            <p className="text-sm font-semibold text-slate-800">
+                              {application.job_title ||
+                                `Job #${application.job_id}`}
+                            </p>
+                          </td>
+
+                          {/* APPLICANT */}
+
+                          <td className="px-5 py-4">
+                            <p className="font-mono text-xs text-slate-500">
+                              {application.user_id}
+                            </p>
+                          </td>
+
+                          {/* APPLICATION ID */}
+
+                          <td className="px-5 py-4">
+                            <span className="font-mono text-xs text-slate-500">
+                              {application.id}
+                            </span>
+                          </td>
+
+                          {/* STATUS */}
+
+                          <td className="px-5 py-4">
+                            <span
+                              className={`inline-flex border px-2.5 py-1 text-[11px] font-semibold ${getStatusStyle(
+                                application.status
+                              )}`}
+                            >
+                              {formatStatus(
+                                application.status
+                              )}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* FOOTER */}
+
+          <footer className="mt-8 border-t border-slate-200 pt-5">
+            <p className="text-xs text-slate-400">
+              MR.DIY Careers Administration
+            </p>
+          </footer>
         </div>
-
       </div>
-
     </main>
   );
 }

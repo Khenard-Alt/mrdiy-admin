@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 type Job = {
-  id: number;
+  id: string;
   title: string | null;
   description: string | null;
   location: string | null;
@@ -30,7 +30,7 @@ const emptyForm: JobForm = {
   location: "",
   salary: "",
   salary_type: "Monthly",
-  status: "Open",
+  status: "published",
 };
 
 export default function JobsPage() {
@@ -42,162 +42,104 @@ export default function JobsPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const [showModal, setShowModal] = useState(false);
   const [editingJob, setEditingJob] = useState<Job | null>(null);
 
-  const [form, setForm] = useState<JobForm>(emptyForm);
+  const [form, setForm] = useState<JobForm>({
+    ...emptyForm,
+  });
 
-  // =========================================================
-  // INITIAL LOAD + JOBS REALTIME
-  // =========================================================
   useEffect(() => {
-    let jobsChannel: ReturnType<typeof supabase.channel> | null = null;
-    let cancelled = false;
+    loadJobs();
+  }, []);
 
-    async function initializeJobs() {
-      setLoading(true);
-      setError("");
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-
-      if (user.app_metadata?.role !== "admin") {
-        await supabase.auth.signOut();
-        router.push("/login");
-        return;
-      }
-
-      // Initial jobs load
-      const { data, error } = await supabase
-        .from("jobs")
-        .select(
-          "id, title, description, location, salary, status, created_at, salary_type"
-        )
-        .order("created_at", {
-          ascending: false,
-        });
-
-      if (cancelled) {
-        return;
-      }
-
-      if (error) {
-        setError(error.message);
-        setLoading(false);
-        return;
-      }
-
-      setJobs(data ?? []);
-      setLoading(false);
-
-      // =====================================================
-      // REALTIME SUBSCRIPTION
-      // =====================================================
-      jobsChannel = supabase
-        .channel("jobs-page-realtime")
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "jobs",
-          },
-          (payload) => {
-            const newJob = payload.new as Job;
-
-            setJobs((currentJobs) => {
-              // Prevent duplicate job
-              if (currentJobs.some((job) => job.id === newJob.id)) {
-                return currentJobs;
-              }
-
-              return [newJob, ...currentJobs];
-            });
-          }
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "UPDATE",
-            schema: "public",
-            table: "jobs",
-          },
-          (payload) => {
-            const updatedJob = payload.new as Job;
-
-            setJobs((currentJobs) =>
-              currentJobs
-                .map((job) =>
-                  job.id === updatedJob.id ? updatedJob : job
-                )
-                .sort((a, b) => {
-                  const dateA = a.created_at
-                    ? new Date(a.created_at).getTime()
-                    : 0;
-
-                  const dateB = b.created_at
-                    ? new Date(b.created_at).getTime()
-                    : 0;
-
-                  return dateB - dateA;
-                })
-            );
-          }
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "DELETE",
-            schema: "public",
-            table: "jobs",
-          },
-          (payload) => {
-            const deletedJob = payload.old as Job;
-
-            setJobs((currentJobs) =>
-              currentJobs.filter((job) => job.id !== deletedJob.id)
-            );
-          }
-        )
-        .subscribe((status) => {
-          if (status === "CHANNEL_ERROR") {
-            setError("Unable to connect to Jobs Realtime.");
-          }
-        });
-    }
-
-    initializeJobs();
+  useEffect(() => {
+    const channel = supabase
+      .channel("jobs-page-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "jobs",
+        },
+        () => {
+          loadJobs();
+        }
+      )
+      .subscribe();
 
     return () => {
-      cancelled = true;
-
-      if (jobsChannel) {
-        supabase.removeChannel(jobsChannel);
-      }
+      supabase.removeChannel(channel);
     };
   }, []);
 
-  // =========================================================
-  // ADD JOB MODAL
-  // =========================================================
+  async function checkAdmin() {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      router.push("/login");
+      return false;
+    }
+
+    if (user.app_metadata?.role !== "admin") {
+      await supabase.auth.signOut();
+      router.push("/login");
+      return false;
+    }
+
+    return true;
+  }
+
+  async function loadJobs() {
+    setLoading(true);
+    setError("");
+
+    const isAdmin = await checkAdmin();
+
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("jobs")
+      .select(
+        "id, title, description, location, salary, status, created_at, salary_type"
+      )
+      .order("created_at", {
+        ascending: false,
+      });
+
+    if (error) {
+      console.error("Load jobs error:", error);
+      setError(error.message);
+      setLoading(false);
+      return;
+    }
+
+    setJobs((data ?? []) as Job[]);
+    setLoading(false);
+  }
+
   function openAddModal() {
     setEditingJob(null);
-    setForm(emptyForm);
+
+    setForm({
+      ...emptyForm,
+    });
+
     setError("");
+    setSuccess("");
     setShowModal(true);
   }
 
-  // =========================================================
-  // EDIT JOB MODAL
-  // =========================================================
   function openEditModal(job: Job) {
     setEditingJob(job);
 
@@ -207,30 +149,27 @@ export default function JobsPage() {
       location: job.location ?? "",
       salary: job.salary ?? "",
       salary_type: job.salary_type ?? "Monthly",
-      status: job.status ?? "Open",
+      status: job.status ?? "published",
     });
 
     setError("");
+    setSuccess("");
     setShowModal(true);
   }
 
-  // =========================================================
-  // CLOSE MODAL
-  // =========================================================
   function closeModal() {
-    if (saving) {
-      return;
-    }
+    if (saving) return;
 
     setShowModal(false);
     setEditingJob(null);
-    setForm(emptyForm);
+
+    setForm({
+      ...emptyForm,
+    });
+
     setError("");
   }
 
-  // =========================================================
-  // UPDATE FORM
-  // =========================================================
   function updateForm(field: keyof JobForm, value: string) {
     setForm((current) => ({
       ...current,
@@ -238,13 +177,11 @@ export default function JobsPage() {
     }));
   }
 
-  // =========================================================
-  // SAVE / UPDATE JOB
-  // =========================================================
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     setError("");
+    setSuccess("");
 
     if (!form.title.trim()) {
       setError("Job title is required.");
@@ -258,56 +195,78 @@ export default function JobsPage() {
 
     setSaving(true);
 
-    // EDIT
+    /*
+     * EDIT EXISTING JOB
+     *
+     * Uses Supabase RPC so the admin update
+     * is handled by the database function.
+     */
     if (editingJob) {
+      const { error } = await supabase.rpc("admin_update_job", {
+        p_id: editingJob.id,
+        p_title: form.title.trim(),
+        p_description: form.description.trim(),
+        p_location: form.location.trim(),
+        p_salary: form.salary.trim(),
+        p_salary_type: form.salary_type,
+        p_status: form.status,
+      });
+
+      if (error) {
+        console.error("Update job error:", error);
+
+        setError(
+          `Failed to update job: ${error.message}`
+        );
+
+        setSaving(false);
+        return;
+      }
+
+      setSuccess("Job updated successfully.");
+    }
+
+    /*
+     * CREATE NEW JOB
+     */
+    else {
       const { error } = await supabase
         .from("jobs")
-        .update({
+        .insert({
           title: form.title.trim(),
           description: form.description.trim(),
           location: form.location.trim(),
           salary: form.salary.trim(),
           salary_type: form.salary_type,
           status: form.status,
-        })
-        .eq("id", editingJob.id);
+        });
 
       if (error) {
-        setError(error.message);
+        console.error("Create job error:", error);
+
+        setError(
+          `Failed to create job: ${error.message}`
+        );
+
         setSaving(false);
         return;
       }
-    }
 
-    // ADD
-    else {
-      const { error } = await supabase.from("jobs").insert({
-        title: form.title.trim(),
-        description: form.description.trim(),
-        location: form.location.trim(),
-        salary: form.salary.trim(),
-        salary_type: form.salary_type,
-        status: form.status,
-      });
-
-      if (error) {
-        setError(error.message);
-        setSaving(false);
-        return;
-      }
+      setSuccess("Job created successfully.");
     }
 
     setSaving(false);
-    closeModal();
 
-    // IMPORTANT:
-    // No manual loadJobs() here.
-    // Supabase Realtime will automatically update the page.
+    setShowModal(false);
+    setEditingJob(null);
+
+    setForm({
+      ...emptyForm,
+    });
+
+    await loadJobs();
   }
 
-  // =========================================================
-  // DELETE JOB
-  // =========================================================
   async function handleDelete(job: Job) {
     const confirmed = window.confirm(
       `Are you sure you want to delete "${job.title ?? "this job"}"?`
@@ -318,6 +277,7 @@ export default function JobsPage() {
     }
 
     setError("");
+    setSuccess("");
 
     const { error } = await supabase
       .from("jobs")
@@ -325,18 +285,20 @@ export default function JobsPage() {
       .eq("id", job.id);
 
     if (error) {
-      setError(error.message);
+      console.error("Delete job error:", error);
+
+      setError(
+        `Failed to delete job: ${error.message}`
+      );
+
       return;
     }
 
-    // IMPORTANT:
-    // No manual loadJobs() here.
-    // DELETE Realtime event will remove it automatically.
+    setSuccess("Job deleted successfully.");
+
+    await loadJobs();
   }
 
-  // =========================================================
-  // LOGOUT
-  // =========================================================
   async function handleLogout() {
     await supabase.auth.signOut();
 
@@ -344,9 +306,6 @@ export default function JobsPage() {
     router.refresh();
   }
 
-  // =========================================================
-  // DATE FORMAT
-  // =========================================================
   function formatDate(date: string | null) {
     if (!date) {
       return "—";
@@ -359,9 +318,54 @@ export default function JobsPage() {
     });
   }
 
-  // =========================================================
-  // SEARCH
-  // =========================================================
+  function formatStatus(status: string | null) {
+    if (!status) {
+      return "Published";
+    }
+
+    const value = status.toLowerCase();
+
+    if (value === "published") {
+      return "Published";
+    }
+
+    if (value === "draft") {
+      return "Draft";
+    }
+
+    if (value === "closed") {
+      return "Closed";
+    }
+
+    if (value === "open") {
+      return "Open";
+    }
+
+    return status;
+  }
+
+  function getStatusStyle(status: string | null) {
+    const value = (status ?? "published").toLowerCase();
+
+    if (
+      value === "published" ||
+      value === "open" ||
+      value === "active"
+    ) {
+      return "border-green-200 bg-green-50 text-green-700";
+    }
+
+    if (value === "closed") {
+      return "border-red-200 bg-red-50 text-red-700";
+    }
+
+    if (value === "draft") {
+      return "border-yellow-200 bg-yellow-50 text-yellow-700";
+    }
+
+    return "border-slate-200 bg-slate-50 text-slate-600";
+  }
+
   const filteredJobs = jobs.filter((job) => {
     const searchText = search.toLowerCase().trim();
 
@@ -370,176 +374,208 @@ export default function JobsPage() {
     }
 
     return (
-      (job.title ?? "").toLowerCase().includes(searchText) ||
-      (job.location ?? "").toLowerCase().includes(searchText) ||
-      (job.description ?? "").toLowerCase().includes(searchText) ||
-      (job.status ?? "").toLowerCase().includes(searchText)
+      (job.title ?? "")
+        .toLowerCase()
+        .includes(searchText) ||
+      (job.location ?? "")
+        .toLowerCase()
+        .includes(searchText) ||
+      (job.description ?? "")
+        .toLowerCase()
+        .includes(searchText) ||
+      (job.status ?? "")
+        .toLowerCase()
+        .includes(searchText) ||
+      (job.salary ?? "")
+        .toLowerCase()
+        .includes(searchText)
     );
   });
 
-  // =========================================================
-  // UI
-  // =========================================================
   return (
-    <main className="min-h-screen bg-gray-100">
-      {/* =====================================================
+    <main className="min-h-screen bg-[#f5f6f8] text-slate-900">
+      {/* =========================
           SIDEBAR
-      ====================================================== */}
-      <aside className="fixed left-0 top-0 hidden h-screen w-64 bg-[#e30613] text-white lg:block">
+      ========================== */}
+
+      <aside className="fixed left-0 top-0 z-20 hidden h-screen w-60 bg-[#e30613] text-white lg:flex lg:flex-col">
         {/* LOGO */}
-        <div className="flex h-20 items-center border-b border-white/20 px-6">
-          <div className="rounded-lg bg-white px-4 py-2">
-            <span className="text-2xl font-black text-[#e30613]">
-              MR.DIY
-            </span>
+
+        <div className="flex h-20 items-center border-b border-white/15 px-6">
+          <div className="flex h-14 w-44 items-center">
+            <img
+              src="/logo.png"
+              alt="MR.DIY"
+              className="h-auto w-full object-contain"
+            />
           </div>
         </div>
 
-        {/* NAVIGATION */}
-        <nav className="px-4 py-6">
-          {/* DASHBOARD */}
+        {/* MENU */}
+
+        <nav className="flex-1 px-3 py-6">
+          <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.15em] text-white/60">
+            Main Menu
+          </p>
+
           <button
             type="button"
             onClick={() => router.push("/dashboard")}
-            className="flex w-full items-center rounded-xl px-4 py-3 text-left font-medium transition hover:bg-white/10"
+            className="flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
-            <span className="mr-3 text-xl">📊</span>
             Dashboard
           </button>
 
-          {/* JOBS */}
           <button
             type="button"
-            className="mt-2 flex w-full items-center rounded-xl bg-white/20 px-4 py-3 text-left font-semibold"
+            className="mt-1 flex w-full border-l-4 border-white bg-white/15 px-6 py-3 text-left text-sm font-semibold"
           >
-            <span className="mr-3 text-xl">💼</span>
             Jobs
           </button>
 
-          {/* APPLICATIONS */}
           <button
             type="button"
             onClick={() => router.push("/applications")}
-            className="mt-2 flex w-full items-center rounded-xl px-4 py-3 text-left font-medium transition hover:bg-white/10"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
-            <span className="mr-3 text-xl">📋</span>
             Applications
           </button>
         </nav>
 
         {/* LOGOUT */}
-        <div className="absolute bottom-0 left-0 right-0 border-t border-white/20 p-4">
+
+        <div className="border-t border-white/15 p-4">
           <button
             type="button"
             onClick={handleLogout}
-            className="flex w-full items-center rounded-xl px-4 py-3 text-left font-medium transition hover:bg-white/10"
+            className="flex w-full px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
-            <span className="mr-3 text-xl">🚪</span>
             Logout
           </button>
         </div>
       </aside>
 
-      {/* =====================================================
-          MAIN
-      ====================================================== */}
-      <div className="lg:ml-64">
-        {/* TOP BAR */}
-        <header className="flex min-h-20 items-center border-b bg-white px-6 py-4 shadow-sm lg:px-8">
+      {/* =========================
+          MAIN CONTENT
+      ========================== */}
+
+      <div className="lg:ml-60">
+        {/* HEADER */}
+
+        <header className="sticky top-0 z-10 flex min-h-20 items-center border-b border-slate-200 bg-white px-6 lg:px-8">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+              MR.DIY Careers
+            </p>
+
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
               Jobs
             </h1>
-
-            <p className="text-sm text-gray-500">
-              Manage MR.DIY job openings
-            </p>
           </div>
         </header>
 
-        {/* CONTENT */}
-        <div className="p-6 lg:p-8">
-          {/* PAGE HEADER */}
-          <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">
-                Job Listings
-              </h2>
+        {/* PAGE CONTENT */}
 
-              <p className="mt-1 text-sm text-gray-500">
-                {jobs.length} job
-                {jobs.length !== 1 ? "s" : ""} in the system
+        <div className="p-5 sm:p-6 lg:p-8">
+          {/* INTRO */}
+
+          <section className="mb-7 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-sm text-slate-500">
+                Create and manage available job openings.
+              </p>
+
+              <p className="mt-2 text-xs font-medium text-slate-400">
+                {jobs.length} total job
+                {jobs.length !== 1 ? "s" : ""}
               </p>
             </div>
 
             <button
               type="button"
               onClick={openAddModal}
-              className="rounded-xl bg-[#e30613] px-5 py-3 font-semibold text-white shadow-sm transition hover:bg-[#c80511]"
+              className="bg-[#e30613] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#c80511]"
             >
               + Add New Job
             </button>
-          </div>
+          </section>
 
-          {/* ERROR */}
+          {/* SUCCESS MESSAGE */}
+
+          {success && !showModal && (
+            <div className="mb-6 border border-green-200 bg-green-50 px-5 py-4 text-sm text-green-700">
+              {success}
+            </div>
+          )}
+
+          {/* ERROR MESSAGE */}
+
           {error && !showModal && (
-            <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
+            <div className="mb-6 border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
               {error}
             </div>
           )}
 
           {/* SEARCH */}
-          <div className="mb-6 rounded-2xl bg-white p-4 shadow-sm">
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
-                🔍
-              </span>
 
-              <input
-                type="text"
-                value={search}
-                onChange={(event) =>
-                  setSearch(event.target.value)
-                }
-                placeholder="Search jobs by title, location, or status..."
-                className="w-full rounded-xl border border-gray-300 bg-white py-3 pl-11 pr-4 text-gray-900 outline-none transition focus:border-[#e30613] focus:ring-2 focus:ring-red-100"
-              />
+          <section className="mb-6 border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">
+                  Job Listings
+                </h2>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Search and manage your current postings.
+                </p>
+              </div>
+
+              <div className="w-full sm:max-w-sm">
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(event) =>
+                    setSearch(event.target.value)
+                  }
+                  placeholder="Search jobs..."
+                  className="w-full border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#e30613]"
+                />
+              </div>
             </div>
-          </div>
+          </section>
 
-          {/* JOBS TABLE */}
-          <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
+          {/* JOB TABLE */}
+
+          <section className="border border-slate-200 bg-white shadow-sm">
             {loading ? (
               <div className="flex min-h-64 items-center justify-center">
                 <div className="text-center">
-                  <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-gray-300 border-t-[#e30613]" />
+                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-[#e30613]" />
 
-                  <p className="mt-4 text-sm text-gray-500">
+                  <p className="mt-4 text-sm text-slate-500">
                     Loading jobs...
                   </p>
                 </div>
               </div>
             ) : filteredJobs.length === 0 ? (
               <div className="px-6 py-16 text-center">
-                <div className="text-5xl">💼</div>
-
-                <h3 className="mt-4 text-lg font-bold text-gray-900">
+                <h3 className="text-sm font-semibold text-slate-800">
                   {search
                     ? "No jobs found"
                     : "No jobs available"}
                 </h3>
 
-                <p className="mt-2 text-sm text-gray-500">
+                <p className="mt-1 text-sm text-slate-500">
                   {search
-                    ? "Try a different search term."
-                    : "Create your first job posting."}
+                    ? "Try another search term."
+                    : "Create a job posting to get started."}
                 </p>
 
                 {!search && (
                   <button
                     type="button"
                     onClick={openAddModal}
-                    className="mt-5 rounded-xl bg-[#e30613] px-5 py-3 text-sm font-semibold text-white hover:bg-[#c80511]"
+                    className="mt-5 bg-[#e30613] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#c80511]"
                   >
                     + Add New Job
                   </button>
@@ -547,194 +583,192 @@ export default function JobsPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[950px]">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Job
+                <table className="w-full min-w-[950px] text-left">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50">
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Position
                       </th>
 
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Location
                       </th>
 
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Salary
                       </th>
 
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Status
                       </th>
 
-                      <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Created
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Date Posted
                       </th>
 
-                      <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Actions
                       </th>
                     </tr>
                   </thead>
 
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredJobs.map((job) => {
-                      const status = job.status ?? "Open";
+                  <tbody>
+                    {filteredJobs.map((job) => (
+                      <tr
+                        key={job.id}
+                        className="border-b border-slate-100 last:border-0 transition hover:bg-slate-50"
+                      >
+                        {/* POSITION */}
 
-                      const statusLower =
-                        status.toLowerCase();
-
-                      const statusClass =
-                        statusLower === "open" ||
-                        statusLower === "active"
-                          ? "bg-green-100 text-green-700"
-                          : statusLower === "closed"
-                            ? "bg-red-100 text-red-700"
-                            : "bg-yellow-100 text-yellow-700";
-
-                      return (
-                        <tr
-                          key={job.id}
-                          className="transition hover:bg-gray-50"
-                        >
-                          {/* JOB */}
-                          <td className="px-6 py-5">
-                            <div className="max-w-sm">
-                              <p className="font-bold text-gray-900">
-                                {job.title ||
-                                  "Untitled Job"}
-                              </p>
-
-                              <p className="mt-1 line-clamp-2 text-sm text-gray-500">
-                                {job.description ||
-                                  "No description provided."}
-                              </p>
-                            </div>
-                          </td>
-
-                          {/* LOCATION */}
-                          <td className="px-6 py-5">
-                            <div className="flex items-center gap-2 text-sm text-gray-700">
-                              <span>📍</span>
-                              {job.location || "—"}
-                            </div>
-                          </td>
-
-                          {/* SALARY */}
-                          <td className="px-6 py-5">
-                            <p className="text-sm font-semibold text-gray-800">
-                              {job.salary || "—"}
+                        <td className="px-5 py-4">
+                          <div className="max-w-sm">
+                            <p className="text-sm font-semibold text-slate-800">
+                              {job.title ||
+                                "Untitled Job"}
                             </p>
 
-                            {job.salary_type && (
-                              <p className="mt-1 text-xs text-gray-500">
-                                {job.salary_type}
-                              </p>
-                            )}
-                          </td>
+                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                              {job.description ||
+                                "No description provided."}
+                            </p>
+                          </div>
+                        </td>
 
-                          {/* STATUS */}
-                          <td className="px-6 py-5">
-                            <span
-                              className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusClass}`}
+                        {/* LOCATION */}
+
+                        <td className="px-5 py-4 text-sm text-slate-600">
+                          {job.location || "—"}
+                        </td>
+
+                        {/* SALARY */}
+
+                        <td className="px-5 py-4">
+                          <p className="text-sm font-medium text-slate-700">
+                            {job.salary || "—"}
+                          </p>
+
+                          {job.salary_type && (
+                            <p className="mt-1 text-xs text-slate-400">
+                              {job.salary_type}
+                            </p>
+                          )}
+                        </td>
+
+                        {/* STATUS */}
+
+                        <td className="px-5 py-4">
+                          <span
+                            className={`inline-flex border px-2.5 py-1 text-[11px] font-semibold ${getStatusStyle(
+                              job.status
+                            )}`}
+                          >
+                            {formatStatus(job.status)}
+                          </span>
+                        </td>
+
+                        {/* DATE */}
+
+                        <td className="px-5 py-4 text-sm text-slate-500">
+                          {formatDate(job.created_at)}
+                        </td>
+
+                        {/* ACTIONS */}
+
+                        <td className="px-5 py-4">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openEditModal(job)
+                              }
+                              className="border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#e30613] hover:text-[#e30613]"
                             >
-                              {status}
-                            </span>
-                          </td>
+                              Edit
+                            </button>
 
-                          {/* CREATED */}
-                          <td className="px-6 py-5 text-sm text-gray-600">
-                            {formatDate(job.created_at)}
-                          </td>
-
-                          {/* ACTIONS */}
-                          <td className="px-6 py-5">
-                            <div className="flex justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  openEditModal(job)
-                                }
-                                className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
-                              >
-                                ✏️ Edit
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleDelete(job)
-                                }
-                                className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50"
-                              >
-                                🗑️ Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDelete(job)
+                              }
+                              className="border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             )}
-          </div>
+          </section>
+
+          {/* FOOTER */}
+
+          <footer className="mt-8 border-t border-slate-200 pt-5">
+            <p className="text-xs text-slate-400">
+              MR.DIY Careers Administration
+            </p>
+          </footer>
         </div>
       </div>
 
-      {/* =====================================================
+      {/* =========================
           ADD / EDIT MODAL
-      ====================================================== */}
+      ========================== */}
+
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-6">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-            {/* HEADER */}
-            <div className="flex items-center justify-between border-b px-6 py-5">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto bg-white shadow-2xl">
+            {/* MODAL HEADER */}
+
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                  MR.DIY Careers
+                </p>
+
+                <h2 className="mt-1 text-xl font-bold text-slate-900">
                   {editingJob
                     ? "Edit Job"
                     : "Add New Job"}
                 </h2>
-
-                <p className="mt-1 text-sm text-gray-500">
-                  {editingJob
-                    ? "Update the job posting details."
-                    : "Create a new MR.DIY job posting."}
-                </p>
               </div>
 
               <button
                 type="button"
                 onClick={closeModal}
                 disabled={saving}
-                className="rounded-xl px-3 py-2 text-xl text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                className="flex h-9 w-9 items-center justify-center border border-slate-200 text-lg text-slate-500 hover:bg-slate-50"
               >
-                ✕
+                ×
               </button>
             </div>
 
             {/* FORM */}
+
             <form
               onSubmit={handleSubmit}
               className="p-6"
             >
+              {/* ERROR */}
+
               {error && (
-                <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                <div className="mb-5 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                   {error}
                 </div>
               )}
 
-              {/* TITLE */}
+              {/* JOB TITLE */}
+
               <div>
-                <label
-                  htmlFor="job-title"
-                  className="mb-2 block text-sm font-semibold text-gray-800"
-                >
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
                   Job Title *
                 </label>
 
                 <input
-                  id="job-title"
                   type="text"
                   value={form.title}
                   onChange={(event) =>
@@ -745,21 +779,18 @@ export default function JobsPage() {
                   }
                   placeholder="e.g. Store Associate"
                   required
-                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 outline-none focus:border-[#e30613] focus:ring-2 focus:ring-red-100"
+                  className="w-full border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
                 />
               </div>
 
               {/* LOCATION */}
+
               <div className="mt-5">
-                <label
-                  htmlFor="job-location"
-                  className="mb-2 block text-sm font-semibold text-gray-800"
-                >
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
                   Location *
                 </label>
 
                 <input
-                  id="job-location"
                   type="text"
                   value={form.location}
                   onChange={(event) =>
@@ -770,22 +801,19 @@ export default function JobsPage() {
                   }
                   placeholder="e.g. Antipolo City"
                   required
-                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 outline-none focus:border-[#e30613] focus:ring-2 focus:ring-red-100"
+                  className="w-full border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
                 />
               </div>
 
-              {/* SALARY */}
-              <div className="mt-5 grid gap-5 md:grid-cols-2">
+              {/* SALARY + SALARY TYPE */}
+
+              <div className="mt-5 grid gap-5 sm:grid-cols-2">
                 <div>
-                  <label
-                    htmlFor="job-salary"
-                    className="mb-2 block text-sm font-semibold text-gray-800"
-                  >
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
                     Salary
                   </label>
 
                   <input
-                    id="job-salary"
                     type="text"
                     value={form.salary}
                     onChange={(event) =>
@@ -795,20 +823,16 @@ export default function JobsPage() {
                       )
                     }
                     placeholder="e.g. ₱15,000"
-                    className="w-full rounded-xl border border-gray-300 px-4 py-3 text-gray-900 outline-none focus:border-[#e30613] focus:ring-2 focus:ring-red-100"
+                    className="w-full border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
                   />
                 </div>
 
                 <div>
-                  <label
-                    htmlFor="salary-type"
-                    className="mb-2 block text-sm font-semibold text-gray-800"
-                  >
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
                     Salary Type
                   </label>
 
                   <select
-                    id="salary-type"
                     value={form.salary_type}
                     onChange={(event) =>
                       updateForm(
@@ -816,7 +840,7 @@ export default function JobsPage() {
                         event.target.value
                       )
                     }
-                    className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none focus:border-[#e30613] focus:ring-2 focus:ring-red-100"
+                    className="w-full border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-[#e30613]"
                   >
                     <option value="Monthly">
                       Monthly
@@ -838,16 +862,13 @@ export default function JobsPage() {
               </div>
 
               {/* STATUS */}
+
               <div className="mt-5">
-                <label
-                  htmlFor="job-status"
-                  className="mb-2 block text-sm font-semibold text-gray-800"
-                >
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
                   Status
                 </label>
 
                 <select
-                  id="job-status"
                   value={form.status}
                   onChange={(event) =>
                     updateForm(
@@ -855,33 +876,30 @@ export default function JobsPage() {
                       event.target.value
                     )
                   }
-                  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none focus:border-[#e30613] focus:ring-2 focus:ring-red-100"
+                  className="w-full border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-[#e30613]"
                 >
-                  <option value="Open">
-                    Open
+                  <option value="published">
+                    Published
                   </option>
 
-                  <option value="Closed">
-                    Closed
-                  </option>
-
-                  <option value="Draft">
+                  <option value="draft">
                     Draft
+                  </option>
+
+                  <option value="closed">
+                    Closed
                   </option>
                 </select>
               </div>
 
               {/* DESCRIPTION */}
+
               <div className="mt-5">
-                <label
-                  htmlFor="job-description"
-                  className="mb-2 block text-sm font-semibold text-gray-800"
-                >
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
                   Job Description
                 </label>
 
                 <textarea
-                  id="job-description"
                   value={form.description}
                   onChange={(event) =>
                     updateForm(
@@ -891,17 +909,18 @@ export default function JobsPage() {
                   }
                   placeholder="Enter the job description..."
                   rows={6}
-                  className="w-full resize-none rounded-xl border border-gray-300 px-4 py-3 text-gray-900 outline-none focus:border-[#e30613] focus:ring-2 focus:ring-red-100"
+                  className="w-full resize-none border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
                 />
               </div>
 
               {/* BUTTONS */}
-              <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+
+              <div className="mt-7 flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="rounded-xl border border-gray-300 px-5 py-3 font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  className="border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
                   Cancel
                 </button>
@@ -909,7 +928,7 @@ export default function JobsPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="rounded-xl bg-[#e30613] px-6 py-3 font-semibold text-white hover:bg-[#c80511] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="bg-[#e30613] px-6 py-3 text-sm font-semibold text-white hover:bg-[#c80511] disabled:opacity-60"
                 >
                   {saving
                     ? "Saving..."
