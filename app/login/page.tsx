@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -12,8 +12,54 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
+  /*
+   * CHECK EXISTING SESSION
+   *
+   * If the admin is already logged in and somehow reaches
+   * the login page again, send them back to the dashboard.
+   */
+  useEffect(() => {
+    let mounted = true;
+
+    async function checkExistingSession() {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!mounted) return;
+
+        if (session?.user) {
+          const role = session.user.app_metadata?.role;
+
+          if (role === "admin") {
+            router.replace("/dashboard");
+            return;
+          }
+
+          // If there is a session but the account is not admin,
+          // clear it so the user can login with the correct account.
+          await supabase.auth.signOut();
+        }
+      } catch (err) {
+        console.error("Session check error:", err);
+      } finally {
+        if (mounted) {
+          setCheckingSession(false);
+        }
+      }
+    }
+
+    checkExistingSession();
+
+    return () => {
+      mounted = false;
+    };
+  }, [router, supabase]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -32,6 +78,9 @@ export default function LoginPage() {
       return;
     }
 
+    /*
+     * ADMIN CHECK
+     */
     if (data.user?.app_metadata?.role !== "admin") {
       await supabase.auth.signOut();
 
@@ -40,18 +89,47 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/dashboard");
+    /*
+     * IMPORTANT:
+     *
+     * Use replace() instead of push().
+     *
+     * This prevents /login from remaining as the previous
+     * browser history page after successful login.
+     */
+    router.replace("/dashboard");
     router.refresh();
+  }
+
+  /*
+   * While checking an existing session, don't show the login
+   * form yet. This prevents a logged-in admin from briefly
+   * seeing the login page.
+   */
+  if (checkingSession) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f5f6f8]">
+        <div className="text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-[#e30613]" />
+
+          <p className="mt-4 text-sm text-slate-500">
+            Checking session...
+          </p>
+        </div>
+      </main>
+    );
   }
 
   return (
     <main className="min-h-screen bg-[#f5f6f8] text-slate-900">
       <div className="grid min-h-screen lg:grid-cols-[1.05fr_0.95fr]">
+
         {/* =================================
             LEFT PANEL
         ================================= */}
 
         <section className="relative hidden overflow-hidden bg-[#e30613] lg:flex lg:min-h-screen lg:flex-col">
+
           {/* Decorative background elements */}
 
           <div className="absolute -right-32 -top-32 h-96 w-96 border border-white/10" />
@@ -59,6 +137,7 @@ export default function LoginPage() {
           <div className="absolute -bottom-40 -left-40 h-[30rem] w-[30rem] border border-white/10" />
 
           <div className="relative z-10 flex min-h-screen flex-col px-14 py-12 xl:px-20">
+
             {/* LOGO */}
 
             <div className="flex h-16 w-48 items-center">
@@ -73,6 +152,7 @@ export default function LoginPage() {
 
             <div className="flex flex-1 items-center">
               <div className="max-w-xl">
+
                 <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-white/65">
                   Careers Administration
                 </p>
@@ -94,6 +174,7 @@ export default function LoginPage() {
                 {/* FEATURES */}
 
                 <div className="mt-10 grid max-w-lg gap-3 sm:grid-cols-2">
+
                   <div className="border border-white/15 bg-white/10 p-5">
                     <p className="text-sm font-semibold text-white">
                       Job Management
@@ -115,6 +196,7 @@ export default function LoginPage() {
                       status.
                     </p>
                   </div>
+
                 </div>
               </div>
             </div>
@@ -126,6 +208,7 @@ export default function LoginPage() {
                 MR.DIY Careers Administration
               </p>
             </div>
+
           </div>
         </section>
 
@@ -134,22 +217,27 @@ export default function LoginPage() {
         ================================= */}
 
         <section className="flex min-h-screen items-center justify-center bg-[#f5f6f8] px-5 py-10 sm:px-8">
+
           <div className="w-full max-w-md">
+
             {/* MOBILE LOGO */}
 
             <div className="mb-10 flex justify-center lg:hidden">
               <div className="flex h-16 w-44 items-center">
+
                 <img
                   src="/logo.png"
                   alt="MR.DIY"
                   className="h-auto w-full object-contain"
                 />
+
               </div>
             </div>
 
             {/* LOGIN HEADING */}
 
             <div className="mb-7">
+
               <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-400">
                 Careers Administration
               </p>
@@ -161,6 +249,7 @@ export default function LoginPage() {
               <p className="mt-2 text-sm leading-6 text-slate-500">
                 Sign in to access the MR.DIY Careers Admin Portal.
               </p>
+
             </div>
 
             {/* LOGIN FORM */}
@@ -169,19 +258,23 @@ export default function LoginPage() {
               onSubmit={handleLogin}
               className="border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
             >
+
               {/* ERROR */}
 
               {error && (
                 <div className="mb-6 border border-red-200 bg-red-50 px-4 py-3">
+
                   <p className="text-sm font-medium text-red-700">
                     {error}
                   </p>
+
                 </div>
               )}
 
               {/* EMAIL */}
 
               <div>
+
                 <label
                   htmlFor="email"
                   className="mb-2 block text-sm font-semibold text-slate-700"
@@ -201,11 +294,13 @@ export default function LoginPage() {
                   autoComplete="email"
                   className="w-full border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#e30613] focus:ring-1 focus:ring-[#e30613]"
                 />
+
               </div>
 
               {/* PASSWORD */}
 
               <div className="mt-5">
+
                 <label
                   htmlFor="password"
                   className="mb-2 block text-sm font-semibold text-slate-700"
@@ -214,6 +309,7 @@ export default function LoginPage() {
                 </label>
 
                 <div className="relative">
+
                   <input
                     id="password"
                     type={showPassword ? "text" : "password"}
@@ -246,6 +342,7 @@ export default function LoginPage() {
                         : "Show password"
                     }
                   >
+
                     {showPassword ? (
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
@@ -255,26 +352,31 @@ export default function LoginPage() {
                         strokeWidth="1.8"
                         className="h-5 w-5"
                       >
+
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           d="M3 3l18 18"
                         />
+
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           d="M10.58 10.58a2 2 0 102.84 2.84"
                         />
+
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           d="M9.88 5.09A10.94 10.94 0 0112 4.88c5.05 0 8.5 4.5 9.5 7.12a11.7 11.7 0 01-3.05 4.18"
                         />
+
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           d="M6.23 6.23C3.93 7.74 2.5 10.06 2.5 12c1 2.62 4.45 7.12 9.5 7.12 1.34 0 2.58-.27 3.69-.74"
                         />
+
                       </svg>
                     ) : (
                       <svg
@@ -285,19 +387,24 @@ export default function LoginPage() {
                         strokeWidth="1.8"
                         className="h-5 w-5"
                       >
+
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z"
                         />
+
                         <circle
                           cx="12"
                           cy="12"
                           r="2.5"
                         />
+
                       </svg>
                     )}
+
                   </button>
+
                 </div>
               </div>
 
@@ -310,11 +417,13 @@ export default function LoginPage() {
               >
                 {loading ? "Signing in..." : "Sign In"}
               </button>
+
             </form>
 
             {/* FOOTER */}
 
             <div className="mt-7 border-t border-slate-200 pt-5 text-center">
+
               <p className="text-xs text-slate-400">
                 Authorized personnel only
               </p>
@@ -322,9 +431,12 @@ export default function LoginPage() {
               <p className="mt-1 text-xs text-slate-400">
                 MR.DIY Careers Administration
               </p>
+
             </div>
+
           </div>
         </section>
+
       </div>
     </main>
   );

@@ -11,11 +11,19 @@ type Application = {
   applied_at: string | null;
   status: string | null;
   job_title: string | null;
+  applicant_name: string | null;
+  applicant_email: string | null;
 };
 
 type Job = {
   id: string;
   title: string | null;
+};
+
+type Profile = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
 };
 
 export default function DashboardPage() {
@@ -104,11 +112,14 @@ export default function DashboardPage() {
       return;
     }
 
-    /* ============================
-       TOTAL JOBS
-    ============================ */
+    // ============================================================
+    // TOTAL JOBS
+    // ============================================================
 
-    const { count: jobsCount, error: jobsError } = await supabase
+    const {
+      count: jobsCount,
+      error: jobsError,
+    } = await supabase
       .from("jobs")
       .select("*", {
         count: "exact",
@@ -121,9 +132,9 @@ export default function DashboardPage() {
       setTotalJobs(jobsCount ?? 0);
     }
 
-    /* ============================
-       APPLICATIONS
-    ============================ */
+    // ============================================================
+    // APPLICATIONS
+    // ============================================================
 
     const {
       data: applications,
@@ -148,9 +159,9 @@ export default function DashboardPage() {
 
     const rows = applications ?? [];
 
-    /* ============================
-       GET JOB TITLES
-    ============================ */
+    // ============================================================
+    // GET JOB TITLES
+    // ============================================================
 
     const jobIds = [
       ...new Set(
@@ -163,11 +174,13 @@ export default function DashboardPage() {
     let jobs: Job[] = [];
 
     if (jobIds.length > 0) {
-      const { data: jobsData, error: jobsError2 } =
-        await supabase
-          .from("jobs")
-          .select("id, title")
-          .in("id", jobIds);
+      const {
+        data: jobsData,
+        error: jobsError2,
+      } = await supabase
+        .from("jobs")
+        .select("id, title")
+        .in("id", jobIds);
 
       if (jobsError2) {
         console.error(
@@ -187,25 +200,82 @@ export default function DashboardPage() {
       }
     });
 
-    /* ============================
-       COMBINE APPLICATION DATA
-    ============================ */
+    // ============================================================
+    // GET APPLICANT PROFILES
+    // ============================================================
+
+    const userIds = [
+      ...new Set(
+        rows
+          .map((application) => application.user_id)
+          .filter(Boolean)
+      ),
+    ];
+
+    let profiles: Profile[] = [];
+
+    if (userIds.length > 0) {
+      const {
+        data: profilesData,
+        error: profilesError,
+      } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", userIds);
+
+      if (profilesError) {
+        console.error(
+          "Applicant profiles loading error:",
+          profilesError
+        );
+      } else {
+        profiles = (profilesData ?? []) as Profile[];
+      }
+    }
+
+    const profileMap = new Map<
+      string,
+      {
+        full_name: string | null;
+        email: string | null;
+      }
+    >();
+
+    profiles.forEach((profile) => {
+      profileMap.set(profile.id, {
+        full_name: profile.full_name,
+        email: profile.email,
+      });
+    });
+
+    // ============================================================
+    // COMBINE APPLICATION DATA
+    // ============================================================
 
     const combinedApplications: Application[] =
-      rows.map((application) => ({
-        id: application.id,
-        user_id: application.user_id,
-        job_id: application.job_id,
-        applied_at: null,
-        status: application.status,
-        job_title:
-          jobMap.get(application.job_id) ??
-          null,
-      }));
+      rows.map((application) => {
+        const profile = profileMap.get(
+          application.user_id
+        );
 
-    /* ============================
-       APPLICATION COUNTS
-    ============================ */
+        return {
+          id: application.id,
+          user_id: application.user_id,
+          job_id: application.job_id,
+          applied_at: null,
+          status: application.status,
+          job_title:
+            jobMap.get(application.job_id) ?? null,
+          applicant_name:
+            profile?.full_name ?? null,
+          applicant_email:
+            profile?.email ?? null,
+        };
+      });
+
+    // ============================================================
+    // APPLICATION COUNTS
+    // ============================================================
 
     setTotalApplications(rows.length);
 
@@ -225,11 +295,7 @@ export default function DashboardPage() {
       ).length
     );
 
-    /*
-     * Since the current applications table does not
-     * expose applied_at in the known schema, use the
-     * returned application order for recent records.
-     */
+    // Show latest 5 applications
     setRecentApplications(
       combinedApplications.slice(0, 5)
     );
@@ -245,7 +311,9 @@ export default function DashboardPage() {
   }
 
   function getStatusStyle(status: string | null) {
-    const value = (status ?? "Pending").toLowerCase();
+    const value = (
+      status ?? "Pending"
+    ).toLowerCase();
 
     if (value === "approved") {
       return "border-green-200 bg-green-50 text-green-700";
@@ -275,11 +343,13 @@ export default function DashboardPage() {
 
   return (
     <main className="min-h-screen bg-[#f5f6f8] text-slate-900">
-      {/* =====================================
+
+      {/* ============================================================
           SIDEBAR
-      ====================================== */}
+      ============================================================ */}
 
       <aside className="fixed left-0 top-0 z-20 hidden h-screen w-60 bg-[#e30613] text-white lg:flex lg:flex-col">
+
         {/* LOGO */}
 
         <div className="flex h-20 items-center border-b border-white/15 px-6">
@@ -295,6 +365,7 @@ export default function DashboardPage() {
         {/* NAVIGATION */}
 
         <nav className="flex-1 px-3 py-6">
+
           <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.15em] text-white/60">
             Main Menu
           </p>
@@ -322,16 +393,20 @@ export default function DashboardPage() {
 
           <button
             type="button"
-            onClick={() => router.push("/applications")}
+            onClick={() =>
+              router.push("/applications")
+            }
             className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
             Applications
           </button>
+
         </nav>
 
         {/* LOGOUT */}
 
         <div className="border-t border-white/15 p-4">
+
           <button
             type="button"
             onClick={handleLogout}
@@ -339,18 +414,22 @@ export default function DashboardPage() {
           >
             Logout
           </button>
+
         </div>
       </aside>
 
-      {/* =====================================
+      {/* ============================================================
           MAIN
-      ====================================== */}
+      ============================================================ */}
 
       <div className="lg:ml-60">
+
         {/* HEADER */}
 
         <header className="sticky top-0 z-10 flex min-h-20 items-center border-b border-slate-200 bg-white px-6 lg:px-8">
+
           <div>
+
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
               MR.DIY Careers
             </p>
@@ -358,26 +437,33 @@ export default function DashboardPage() {
             <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
               Dashboard
             </h1>
+
           </div>
+
         </header>
 
         {/* CONTENT */}
 
         <div className="p-5 sm:p-6 lg:p-8">
+
           {/* INTRO */}
 
           <section className="mb-7 border-b border-slate-200 pb-6">
+
             <p className="text-sm text-slate-500">
               Monitor job postings and application activity.
             </p>
+
           </section>
 
-          {/* =====================================
+          {/* ========================================================
               OVERVIEW
-          ====================================== */}
+          ======================================================== */}
 
           <section>
+
             <div className="mb-4">
+
               <h2 className="text-lg font-bold text-slate-900">
                 Overview
               </h2>
@@ -385,14 +471,19 @@ export default function DashboardPage() {
               <p className="mt-1 text-sm text-slate-500">
                 Current recruitment activity
               </p>
+
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
               {/* TOTAL JOBS */}
 
               <div className="border border-slate-200 bg-white p-5 shadow-sm">
+
                 <div className="flex items-start justify-between">
+
                   <div>
+
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                       Total Jobs
                     </p>
@@ -400,11 +491,13 @@ export default function DashboardPage() {
                     <p className="mt-3 text-3xl font-bold text-slate-900">
                       {loading ? "—" : totalJobs}
                     </p>
+
                   </div>
 
                   <span className="border border-red-100 bg-red-50 px-2.5 py-1 text-[10px] font-bold text-[#e30613]">
                     JOBS
                   </span>
+
                 </div>
 
                 <button
@@ -414,13 +507,17 @@ export default function DashboardPage() {
                 >
                   Manage jobs →
                 </button>
+
               </div>
 
               {/* APPLICATIONS */}
 
               <div className="border border-slate-200 bg-white p-5 shadow-sm">
+
                 <div className="flex items-start justify-between">
+
                   <div>
+
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                       Applications
                     </p>
@@ -430,11 +527,13 @@ export default function DashboardPage() {
                         ? "—"
                         : totalApplications}
                     </p>
+
                   </div>
 
                   <span className="border border-blue-100 bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-700">
                     ALL
                   </span>
+
                 </div>
 
                 <button
@@ -446,13 +545,17 @@ export default function DashboardPage() {
                 >
                   View applications →
                 </button>
+
               </div>
 
               {/* PENDING */}
 
               <div className="border border-slate-200 bg-white p-5 shadow-sm">
+
                 <div className="flex items-start justify-between">
+
                   <div>
+
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                       Pending Review
                     </p>
@@ -462,11 +565,13 @@ export default function DashboardPage() {
                         ? "—"
                         : pendingApplications}
                     </p>
+
                   </div>
 
                   <span className="border border-yellow-100 bg-yellow-50 px-2.5 py-1 text-[10px] font-bold text-yellow-700">
                     PENDING
                   </span>
+
                 </div>
 
                 <button
@@ -478,13 +583,17 @@ export default function DashboardPage() {
                 >
                   Review applications →
                 </button>
+
               </div>
 
               {/* APPROVED */}
 
               <div className="border border-slate-200 bg-white p-5 shadow-sm">
+
                 <div className="flex items-start justify-between">
+
                   <div>
+
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                       Approved
                     </p>
@@ -494,11 +603,13 @@ export default function DashboardPage() {
                         ? "—"
                         : approvedApplications}
                     </p>
+
                   </div>
 
                   <span className="border border-green-100 bg-green-50 px-2.5 py-1 text-[10px] font-bold text-green-700">
                     APPROVED
                   </span>
+
                 </div>
 
                 <button
@@ -510,16 +621,21 @@ export default function DashboardPage() {
                 >
                   View approved →
                 </button>
+
               </div>
+
             </div>
+
           </section>
 
-          {/* =====================================
+          {/* ========================================================
               QUICK ACTIONS
-          ====================================== */}
+          ======================================================== */}
 
           <section className="mt-8">
+
             <div className="mb-4">
+
               <h2 className="text-lg font-bold text-slate-900">
                 Quick Actions
               </h2>
@@ -527,9 +643,11 @@ export default function DashboardPage() {
               <p className="mt-1 text-sm text-slate-500">
                 Frequently used recruitment management actions.
               </p>
+
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
+
               {/* MANAGE JOBS */}
 
               <button
@@ -537,6 +655,7 @@ export default function DashboardPage() {
                 onClick={() => router.push("/jobs")}
                 className="border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-[#e30613]"
               >
+
                 <p className="text-sm font-bold text-slate-900">
                   Manage Jobs
                 </p>
@@ -549,6 +668,7 @@ export default function DashboardPage() {
                 <p className="mt-4 text-xs font-semibold text-[#e30613]">
                   Open Jobs →
                 </p>
+
               </button>
 
               {/* APPLICATIONS */}
@@ -560,6 +680,7 @@ export default function DashboardPage() {
                 }
                 className="border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-[#e30613]"
               >
+
                 <p className="text-sm font-bold text-slate-900">
                   Review Applications
                 </p>
@@ -572,19 +693,25 @@ export default function DashboardPage() {
                 <p className="mt-4 text-xs font-semibold text-[#e30613]">
                   Open Applications →
                 </p>
+
               </button>
+
             </div>
+
           </section>
 
-          {/* =====================================
+          {/* ========================================================
               RECENT APPLICATIONS
-          ====================================== */}
+          ======================================================== */}
 
           <section className="mt-8 border border-slate-200 bg-white shadow-sm">
+
             {/* HEADER */}
 
             <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+
               <div>
+
                 <h2 className="text-lg font-bold text-slate-900">
                   Recent Applications
                 </h2>
@@ -593,6 +720,7 @@ export default function DashboardPage() {
                   Latest applications received by the recruitment
                   system.
                 </p>
+
               </div>
 
               <button
@@ -604,32 +732,39 @@ export default function DashboardPage() {
               >
                 View all
               </button>
+
             </div>
 
             {/* ERROR */}
 
             {error && (
               <div className="border-b border-red-200 bg-red-50 px-5 py-4">
+
                 <p className="text-sm text-red-700">
                   {error}
                 </p>
+
               </div>
             )}
 
             {/* LOADING */}
 
             {loading ? (
+
               <div className="px-5 py-14 text-center">
+
                 <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-[#e30613]" />
 
                 <p className="mt-4 text-sm text-slate-500">
                   Loading applications...
                 </p>
+
               </div>
+
             ) : recentApplications.length === 0 ? (
-              /* EMPTY */
 
               <div className="px-5 py-14 text-center">
+
                 <h3 className="text-sm font-semibold text-slate-800">
                   No applications recorded
                 </h3>
@@ -637,14 +772,19 @@ export default function DashboardPage() {
                 <p className="mt-1 text-sm text-slate-500">
                   New applicant submissions will appear here.
                 </p>
+
               </div>
+
             ) : (
-              /* TABLE */
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[700px] text-left">
+
+                <table className="w-full min-w-[800px] text-left">
+
                   <thead>
+
                     <tr className="border-b border-slate-200 bg-slate-50">
+
                       <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Position
                       </th>
@@ -654,50 +794,64 @@ export default function DashboardPage() {
                       </th>
 
                       <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Application ID
+                        Email
                       </th>
 
                       <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Status
                       </th>
+
                     </tr>
+
                   </thead>
 
                   <tbody>
+
                     {recentApplications.map(
                       (application) => (
+
                         <tr
                           key={application.id}
                           className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
                         >
+
                           {/* POSITION */}
 
                           <td className="px-5 py-4">
+
                             <p className="text-sm font-semibold text-slate-800">
                               {application.job_title ||
                                 `Job #${application.job_id}`}
                             </p>
+
                           </td>
 
                           {/* APPLICANT */}
 
                           <td className="px-5 py-4">
-                            <p className="font-mono text-xs text-slate-500">
-                              {application.user_id}
+
+                            <p className="text-sm font-semibold text-slate-800">
+                              {application.applicant_name ||
+                                "Name not available"}
                             </p>
+
                           </td>
 
-                          {/* APPLICATION ID */}
+                          {/* EMAIL */}
 
                           <td className="px-5 py-4">
-                            <span className="font-mono text-xs text-slate-500">
-                              {application.id}
+
+                            <span className="text-xs text-slate-500">
+                              {application.applicant_email ||
+                                "No email"}
                             </span>
+
                           </td>
 
                           {/* STATUS */}
 
                           <td className="px-5 py-4">
+
                             <span
                               className={`inline-flex border px-2.5 py-1 text-[11px] font-semibold ${getStatusStyle(
                                 application.status
@@ -707,25 +861,38 @@ export default function DashboardPage() {
                                 application.status
                               )}
                             </span>
+
                           </td>
+
                         </tr>
+
                       )
                     )}
+
                   </tbody>
+
                 </table>
+
               </div>
+
             )}
+
           </section>
 
           {/* FOOTER */}
 
           <footer className="mt-8 border-t border-slate-200 pt-5">
+
             <p className="text-xs text-slate-400">
               MR.DIY Careers Administration
             </p>
+
           </footer>
+
         </div>
+
       </div>
+
     </main>
   );
 }

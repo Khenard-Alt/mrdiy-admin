@@ -271,7 +271,34 @@ export default function ApplicationsPage() {
     setError("");
 
     try {
-      const { error } = await supabase
+      // Get logged-in admin
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        throw new Error("Admin session not found.");
+      }
+
+      // Find the application
+      const application = applications.find(
+        (item) => item.id === applicationId
+      );
+
+      if (!application) {
+        throw new Error("Application not found.");
+      }
+
+      // Prevent duplicate messages when clicking the same status
+      const currentStatus =
+        application.status || "Pending";
+
+      const statusChanged =
+        currentStatus.toLowerCase() !==
+        newStatus.toLowerCase();
+
+      // Update application status
+      const { error: statusError } = await supabase
         .from("applications")
         .update({
           status: newStatus,
@@ -279,21 +306,79 @@ export default function ApplicationsPage() {
         })
         .eq("id", applicationId);
 
-      if (error) {
-        throw new Error(error.message);
+      if (statusError) {
+        throw new Error(statusError.message);
       }
 
+      // ============================================================
+      // AUTOMATIC MESSAGE TO APPLICANT
+      // ============================================================
+
+      if (statusChanged && application.user_id) {
+        let messageBody = "";
+
+        if (newStatus === "Reviewed") {
+          messageBody =
+            `Dear Applicant\n\n` +
+            `Your application has been reviewed by our recruitment team. ` +
+            `We will continue evaluating your application and will provide ` +
+            `an update once a decision has been made.\n\n` +
+            `Thank you for your interest in MR.DIY.`;
+        }
+
+        if (newStatus === "Approved") {
+          messageBody =
+            `Congratulations!\n\n` +
+            `Your application has been approved by our recruitment team. ` +
+            `Please check your messages for further instructions regarding ` +
+            `the next steps.\n\n` +
+            `Thank you for your interest in MR.DIY.`;
+        }
+
+        if (newStatus === "Rejected") {
+          messageBody =
+            `Dear Applicant\n\n` +
+            `Thank you for your interest in MR.DIY. We appreciate the ` +
+            `opportunity to consider your application.\n\n` +
+            `After reviewing your application, we have decided to proceed ` +
+            `with other candidates whose qualifications more closely match ` +
+            `our current requirements.\n\n` +
+            `We wish you the best in your future endeavors.`;
+        }
+
+        // Save message only for Reviewed, Approved, or Rejected
+        if (messageBody) {
+          const { error: messageError } = await supabase
+            .from("messages")
+            .insert({
+              sender_id: user.id,
+              receiver_id: application.user_id,
+              job_id: application.job_id,
+              body: messageBody,
+              is_read: false,
+            });
+
+          if (messageError) {
+            throw new Error(
+              `Status updated, but message could not be sent: ${messageError.message}`
+            );
+          }
+        }
+      }
+
+      // Update application list
       setApplications((current) =>
-        current.map((application) =>
-          application.id === applicationId
+        current.map((item) =>
+          item.id === applicationId
             ? {
-                ...application,
+                ...item,
                 status: newStatus,
               }
-            : application
+            : item
         )
       );
 
+      // Update selected application
       setSelectedApplication((current) =>
         current &&
         current.id === applicationId
@@ -307,7 +392,7 @@ export default function ApplicationsPage() {
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to update status."
+          : "Failed to update application."
       );
     } finally {
       setUpdating(false);
