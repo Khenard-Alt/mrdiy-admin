@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdminSession } from "@/lib/requireAdminSession";
 import { applicationStatusAlert, insertAlerts } from "@/lib/notifications";
+import {
+  isKnownStatus,
+  normalizeStatus,
+  PRE_EMPLOYMENT_REQUIREMENTS,
+  statusContent,
+} from "@/lib/pipeline";
 import { sendApplicantEmail, type EmailKind, type EmailResult } from "@/lib/email";
 
 export async function GET(request: NextRequest) {
@@ -109,6 +115,19 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Application id and status are required." }, { status: 400 });
   }
 
+  if (!isKnownStatus(status)) {
+    return NextResponse.json({ error: `Unknown status: ${status}` }, { status: 400 });
+  }
+
+  const next = normalizeStatus(status);
+
+  if (next === "Interview Scheduled") {
+    return NextResponse.json(
+      { error: "Use Schedule interview to set this step, so the date and venue are saved." },
+      { status: 400 }
+    );
+  }
+
   const supabase = createAdminClient();
 
   const { data: existing, error: fetchError } = await supabase
@@ -121,97 +140,93 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: fetchError?.message ?? "Application not found." }, { status: 404 });
   }
 
-  const statusChanged = (existing.status ?? "Pending").toLowerCase() !== status.toLowerCase();
+  const statusChanged = normalizeStatus(existing.status) !== next;
 
   const { error: updateError } = await supabase
     .from("applications")
-    .update({ status, updated_at: new Date().toISOString() })
+    .update({ status: next, updated_at: new Date().toISOString() })
     .eq("id", id);
 
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
+  const warnings: string[] = [];
   let emailResult: EmailResult | null = null;
 
   if (statusChanged && existing.user_id) {
-    // Per-user notification (shown in the app's bell); the message below is the longer HR note.
-    const { data: job } = await supabase
-      .from("jobs")
-      .select("title")
-      .eq("id", existing.job_id)
-      .maybeSingle();
-    const statusAlert = applicationStatusAlert(
-      existing.user_id,
-      existing.job_id,
-      job?.title ?? null,
-      status
-    );
+    const [{ data: job }, { data: applicant }] = await Promise.all([
+      supabase.from("jobs").select("title").eq("id", existing.job_id).maybeSingle(),
+      supabase.from("profiles").select("email, full_name").eq("user_id", existing.user_id).maybeSingle(),
+    ]);
+    const firstName = (applicant?.full_name ?? "").trim().split(/\s+/)[0];
+    const content = statusContent(next, job?.title ?? null, firstName);
+
+    // 1) The applicant's notification (bell, phone tray).
+    const statusAlert = applicationStatusAlert(existing.user_id, existing.job_id, job?.title ?? null, next);
     if (statusAlert) await insertAlerts(supabase, [statusAlert]);
 
-    let messageBody = "";
-
-    if (status === "Reviewed") {
-      messageBody =
-        "Dear Applicant\n\nYour application has been reviewed by our recruitment team. " +
-        "We will continue evaluating your application and will provide an update once a decision has been made.\n\n" +
-        "Thank you for your interest in MR.DIY.";
+    // 2) Hired: create the pre-employment document checklist.
+    if (next === "Hired") {
+      const { error: checklistError } = await supabase.from("pre_employment_requirements").upsert(
+        PRE_EMPLOYMENT_REQUIREMENTS.map((name) => ({
+          user_id: existing.user_id,
+          application_id: existing.id,
+          requirement_name: name,
+        })),
+        { onConflict: "application_id,requirement_name", ignoreDuplicates: true }
+      );
+      if (checklistError) warnings.push(`The document checklist could not be created: ${checklistError.message}`);
     }
 
-    if (status === "Approved") {
-      messageBody =
-        "Congratulations!\n\nYour application has been approved by our recruitment team. " +
-        "Please check your messages for further instructions regarding the next steps.\n\n" +
-        "Thank you for your interest in MR.DIY.";
-    }
-
-    if (status === "Rejected") {
-      messageBody =
-        "Dear Applicant\n\nThank you for your interest in MR.DIY. We appreciate the opportunity to consider your application.\n\n" +
-        "After reviewing your application, we have decided to proceed with other candidates whose qualifications more closely match our current requirements.\n\n" +
-        "We wish you the best in your future endeavors.";
-    }
-
-    // The decisions are emailed too (Pending stays an in-app note). Uses the same text as the HR message.
-    if (statusAlert && status.toLowerCase() !== "pending") {
-      const { data: applicant } = await supabase
-        .from("profiles")
-        .select("email, full_name")
-        .eq("user_id", existing.user_id)
-        .maybeSingle();
-      const firstName = (applicant?.full_name ?? "").trim().split(/\s+/)[0];
-      emailResult = await sendApplicantEmail(supabase, {
-        userId: existing.user_id,
-        applicationId: existing.id,
-        to: applicant?.email,
-        subject: job?.title ? `${statusAlert.title}: ${job.title}` : statusAlert.title,
-        body: (messageBody || statusAlert.message).replace(/^Dear Applicant/, firstName ? `Dear ${firstName}` : "Dear Applicant"),
-        heading: statusAlert.title,
-        kind: status.toLowerCase() as EmailKind,
-        jobTitle: job?.title ?? null,
-      });
-    }
-
-    if (messageBody) {
+    // 3) The longer HR note in the applicant's messages (not for Pending, which is just the starting point).
+    if (next !== "Pending") {
       const { error: messageError } = await supabase.from("messages").insert({
         sender_id: session.id,
         receiver_id: existing.user_id,
         job_id: existing.job_id,
-        body: messageBody,
+        body: content.note,
         is_read: false,
       });
+      if (messageError) warnings.push(`The message could not be sent: ${messageError.message}`);
 
-      if (messageError) {
-        return NextResponse.json(
-          {
-            ok: true,
-            email: emailResult,
-            warning: `Status updated, but message could not be sent: ${messageError.message}`,
-          }
-        );
-      }
+      // 4) The same note by email.
+      emailResult = await sendApplicantEmail(supabase, {
+        userId: existing.user_id,
+        applicationId: existing.id,
+        to: applicant?.email,
+        subject: job?.title ? `${content.title}: ${job.title}` : content.title,
+        heading: content.title,
+        body: content.note,
+        kind: emailKindFor(next),
+        jobTitle: job?.title ?? null,
+      });
     }
   }
 
-  return NextResponse.json({ ok: true, email: emailResult });
+  return NextResponse.json({
+    ok: true,
+    status: next,
+    email: emailResult,
+    ...(warnings.length > 0 ? { warning: `Status updated, but: ${warnings.join(" ")}` } : {}),
+  });
+}
+
+function emailKindFor(status: ReturnType<typeof normalizeStatus>): EmailKind {
+  switch (status) {
+    case "Reviewed":
+      return "reviewed";
+    case "Shortlisted":
+      return "shortlisted";
+    case "Interview Scheduled":
+      return "interview";
+    case "Hired":
+      return "hired";
+    case "Rejected":
+      return "rejected";
+    case "On Hold":
+      return "on_hold";
+    default:
+      return "pending";
+  }
 }

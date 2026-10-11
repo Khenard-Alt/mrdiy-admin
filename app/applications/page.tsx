@@ -4,6 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import ApplicantReview from "./ApplicantReview";
+import InterviewPanel from "./InterviewPanel";
+import RequirementsPanel from "./RequirementsPanel";
+import RankingPanel from "./RankingPanel";
+import {
+  normalizeStatus,
+  SETTABLE_STATUSES,
+  statusClasses,
+  statusLabel,
+  STATUS_VALUES,
+} from "@/lib/pipeline";
 
 type Application = {
   id: string;
@@ -59,6 +69,7 @@ export default function ApplicationsPage() {
     error?: string;
   } | null>(null);
   const [reviewVersion, setReviewVersion] = useState(0);
+  const [showRanking, setShowRanking] = useState(false);
   const [emailCheck, setEmailCheck] = useState<{
     state: "idle" | "checking" | "ok" | "failed" | "not_configured";
     message?: string;
@@ -237,22 +248,7 @@ export default function ApplicationsPage() {
   // ============================================================
 
   function getStatusStyle(status: string | null) {
-    const value =
-      status?.toLowerCase() || "pending";
-
-    if (value === "approved") {
-      return "border-green-200 bg-green-50 text-green-700";
-    }
-
-    if (value === "rejected") {
-      return "border-red-200 bg-red-50 text-red-700";
-    }
-
-    if (value === "reviewed") {
-      return "border-blue-200 bg-blue-50 text-blue-700";
-    }
-
-    return "border-yellow-200 bg-yellow-50 text-yellow-700";
+    return statusClasses(status);
   }
 
   // ============================================================
@@ -282,7 +278,7 @@ export default function ApplicationsPage() {
         application.job?.location || "";
 
       const status =
-        application.status || "Pending";
+        statusLabel(application.status);
 
       const matchesSearch =
         !keyword ||
@@ -310,8 +306,7 @@ export default function ApplicationsPage() {
 
       const matchesStatus =
         statusFilter === "All" ||
-        status.toLowerCase() ===
-          statusFilter.toLowerCase();
+        normalizeStatus(application.status) === statusFilter;
 
       return matchesSearch && matchesStatus;
     });
@@ -454,6 +449,25 @@ export default function ApplicationsPage() {
               SEARCH
           ====================================================== */}
 
+          <div className="mb-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setShowRanking((value) => !value)}
+              className="border border-[#e30613] px-4 py-2.5 text-xs font-semibold text-[#e30613] hover:bg-red-50"
+            >
+              {showRanking ? "Hide applicant ranking" : "Rank applicants by job"}
+            </button>
+          </div>
+
+          {showRanking && (
+            <RankingPanel
+              onOpen={(applicationId) => {
+                const match = applications.find((item) => item.id === applicationId);
+                if (match) setSelectedApplication(match);
+              }}
+            />
+          )}
+
           <section className="mb-6 border border-slate-200 bg-white p-4 shadow-sm">
 
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -495,21 +509,11 @@ export default function ApplicationsPage() {
                     All Status
                   </option>
 
-                  <option value="Pending">
-                    Pending
-                  </option>
-
-                  <option value="Reviewed">
-                    Reviewed
-                  </option>
-
-                  <option value="Approved">
-                    Approved
-                  </option>
-
-                  <option value="Rejected">
-                    Rejected
-                  </option>
+                  {STATUS_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {statusLabel(value)}
+                    </option>
+                  ))}
                 </select>
 
                 {(search ||
@@ -723,8 +727,7 @@ export default function ApplicationsPage() {
                                   application.status
                                 )}`}
                               >
-                                {application.status ||
-                                  "Pending"}
+                                {statusLabel(application.status)}
                               </span>
                             </td>
 
@@ -838,8 +841,7 @@ export default function ApplicationsPage() {
                       selectedApplication.status
                     )}`}
                   >
-                    {selectedApplication.status ||
-                      "Pending"}
+                    {statusLabel(selectedApplication.status)}
                   </span>
 
                 </div>
@@ -1074,73 +1076,31 @@ export default function ApplicationsPage() {
                   Select the current status of this application.
                 </p>
 
-                <div className="mt-5 grid gap-3 sm:grid-cols-2">
-
-                  {/* PENDING */}
-
-                  <button
-                    type="button"
-                    disabled={updating}
-                    onClick={() =>
-                      updateStatus(
-                        selectedApplication.id,
-                        "Pending"
-                      )
-                    }
-                    className="border border-yellow-200 bg-yellow-50 px-5 py-4 text-sm font-semibold text-yellow-700 hover:bg-yellow-100 disabled:opacity-50"
-                  >
-                    Pending
-                  </button>
-
-                  {/* REVIEWED */}
-
-                  <button
-                    type="button"
-                    disabled={updating}
-                    onClick={() =>
-                      updateStatus(
-                        selectedApplication.id,
-                        "Reviewed"
-                      )
-                    }
-                    className="border border-blue-200 bg-blue-50 px-5 py-4 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-                  >
-                    Reviewed
-                  </button>
-
-                  {/* APPROVED */}
-
-                  <button
-                    type="button"
-                    disabled={updating}
-                    onClick={() =>
-                      updateStatus(
-                        selectedApplication.id,
-                        "Approved"
-                      )
-                    }
-                    className="border border-green-200 bg-green-50 px-5 py-4 text-sm font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50"
-                  >
-                    Approved
-                  </button>
-
-                  {/* REJECTED */}
-
-                  <button
-                    type="button"
-                    disabled={updating}
-                    onClick={() =>
-                      updateStatus(
-                        selectedApplication.id,
-                        "Rejected"
-                      )
-                    }
-                    className="border border-red-200 bg-red-50 px-5 py-4 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
-                  >
-                    Rejected
-                  </button>
-
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {SETTABLE_STATUSES.map((value) => {
+                    const current =
+                      normalizeStatus(selectedApplication.status) === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        disabled={updating}
+                        onClick={() => updateStatus(selectedApplication.id, value)}
+                        className={`border px-5 py-4 text-sm font-semibold disabled:opacity-50 ${statusClasses(
+                          value
+                        )} ${current ? "ring-2 ring-slate-900" : "hover:brightness-95"}`}
+                      >
+                        {statusLabel(value)}
+                        {current && <span className="ml-2 text-xs font-normal">(current)</span>}
+                      </button>
+                    );
+                  })}
                 </div>
+
+                <p className="mt-3 text-xs text-slate-500">
+                  The <strong>Interview Scheduled</strong> step is set by scheduling an interview below.
+                  Every change notifies the applicant in the app and by email.
+                </p>
 
                 {updating && (
                   <p className="mt-4 text-xs text-slate-500">
@@ -1196,6 +1156,38 @@ export default function ApplicationsPage() {
                 )}
 
               </section>
+
+              {/* ==================================================
+                  INTERVIEW
+              ================================================== */}
+
+              <InterviewPanel
+                key={selectedApplication.id}
+                applicationId={selectedApplication.id}
+                defaultVenue={selectedApplication.job?.location ?? ""}
+                onStatusChange={(newStatus) => {
+                  setApplications((current) =>
+                    current.map((item) =>
+                      item.id === selectedApplication.id ? { ...item, status: newStatus } : item
+                    )
+                  );
+                  setSelectedApplication((current) =>
+                    current && current.id === selectedApplication.id ? { ...current, status: newStatus } : current
+                  );
+                  setReviewVersion((version) => version + 1);
+                }}
+              />
+
+              {/* ==================================================
+                  PRE-EMPLOYMENT DOCUMENTS (after Hired)
+              ================================================== */}
+
+              {normalizeStatus(selectedApplication.status) === "Hired" && (
+                <RequirementsPanel
+                  key={`${selectedApplication.id}-${reviewVersion}`}
+                  applicationId={selectedApplication.id}
+                />
+              )}
 
               {/* CLOSE */}
 

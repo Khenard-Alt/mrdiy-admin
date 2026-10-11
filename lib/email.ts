@@ -78,13 +78,24 @@ const BRAND = {
   border: "#DDD9CA",
 };
 
-export type EmailKind = "pending" | "reviewed" | "approved" | "rejected" | "info";
+export type EmailKind =
+  | "pending"
+  | "reviewed"
+  | "shortlisted"
+  | "interview"
+  | "hired"
+  | "rejected"
+  | "on_hold"
+  | "info";
 
 const BADGES: Record<EmailKind, { label: string; bg: string; fg: string } | null> = {
   pending: { label: "PENDING", bg: "#FFF3BF", fg: "#7A5B00" },
   reviewed: { label: "UNDER REVIEW", bg: "#DCE9FF", fg: "#1D4ED8" },
-  approved: { label: "ACCEPTED", bg: "#D9F5E3", fg: "#157A3D" },
+  shortlisted: { label: "SHORTLISTED", bg: "#EADCFF", fg: "#6D28D9" },
+  interview: { label: "INTERVIEW", bg: "#E0E7FF", fg: "#3730A3" },
+  hired: { label: "HIRED", bg: "#D9F5E3", fg: "#157A3D" },
   rejected: { label: "NOT SELECTED", bg: "#FBE0E1", fg: "#B4141B" },
+  on_hold: { label: "ON HOLD", bg: "#E5E7EB", fg: "#374151" },
   info: null,
 };
 

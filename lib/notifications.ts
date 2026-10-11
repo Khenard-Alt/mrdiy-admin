@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  analyzeMatch,
+  buildPositionText,
+  scoreCandidate,
   buildJobDoc,
   buildProfileDoc,
   combineScore,
@@ -8,6 +9,7 @@ import {
 } from "@/lib/matching";
 import { distanceBetween, formatDistance, NEAR_ME_RADIUS_KM } from "@/lib/location";
 import { sendPush } from "@/lib/push";
+import { isKnownStatus, statusContent } from "@/lib/pipeline";
 
 /** Applicants whose combined match score for a new job reaches this get a "matches you" alert. */
 export const JOB_MATCH_THRESHOLD = 50;
@@ -17,6 +19,7 @@ export type AlertType =
   | "NEARBY_JOB"
   | "JOB_MATCH"
   | "APPLICATION_UPDATE"
+  | "INTERVIEW_INVITE"
   | "MESSAGE"
   | "SYSTEM";
 
@@ -66,7 +69,7 @@ export async function notifyNewJob(supabase: SupabaseClient, job: NewJob) {
   const [{ data: profiles, error: profileError }, { data: jobs }] = await Promise.all([
     supabase
       .from("profiles")
-      .select("user_id, location, skills, desired_position, headline, about, work_experiences, education"),
+      .select("user_id, location, skills, desired_position, headline, about, work_experiences, education, resume_url"),
     supabase.from("jobs").select("*").eq("status", "published").limit(1000),
   ]);
 
@@ -93,7 +96,25 @@ export async function notifyNewJob(supabase: SupabaseClient, job: NewJob) {
         };
       }
 
-      const text = analyzeMatch(buildProfileDoc(profile), jobDoc, corpus).textScore;
+      // "Matches your profile" is only said to applicants who have a resume to compare.
+      if (!profile.resume_url) {
+        counts.general += 1;
+        return {
+          user_id: profile.user_id,
+          type: "NEW_JOB" as const,
+          title: "New job published",
+          message: `${job.title}${where}`,
+          job_id: job.id,
+        };
+      }
+
+      const text = scoreCandidate({
+        profileDoc: buildProfileDoc(profile),
+        positionText: buildPositionText(profile),
+        jobDoc,
+        jobTitle: job.title ?? "",
+        corpusDocs: corpus,
+      }).textScore;
       const score = combineScore(text, km);
       if (score >= JOB_MATCH_THRESHOLD) {
         counts.matches += 1;
@@ -122,45 +143,20 @@ export async function notifyNewJob(supabase: SupabaseClient, job: NewJob) {
   return { notified: alerts.length, ...counts };
 }
 
-const STATUS_ALERTS: Record<string, (jobTitle: string) => { title: string; message: string }> = {
-  pending: (jobTitle) => ({
-    title: "Application pending",
-    message: `Your application for ${jobTitle} is pending. We will update you once it is reviewed.`,
-  }),
-  reviewed: (jobTitle) => ({
-    title: "Application under review",
-    message: `Our team is reviewing your application for ${jobTitle}. We will update you once a decision is made.`,
-  }),
-  approved: (jobTitle) => ({
-    title: "Application accepted",
-    message: `Congratulations! Your application for ${jobTitle} was accepted. Check your messages for the next steps.`,
-  }),
-  rejected: (jobTitle) => ({
-    title: "Application rejected",
-    message: `Thank you for applying for ${jobTitle}. We decided to proceed with other candidates this time.`,
-  }),
-};
-
-// The admin buttons are Pending / Reviewed / Approved / Rejected; the applicant sees friendlier names.
-const STATUS_ALIASES: Record<string, string> = {
-  "under review": "reviewed",
-  accepted: "approved",
-};
-
-/** Alert for an applicant when HR changes their application status. */
+/** Alert for an applicant when HR moves their application to another step of the pipeline. */
 export function applicationStatusAlert(
   userId: string,
   jobId: string | null,
   jobTitle: string | null,
   status: string
 ): AlertInsert | null {
-  const key = status.toLowerCase();
-  const build = STATUS_ALERTS[STATUS_ALIASES[key] ?? key];
-  if (!build) return null;
+  if (!isKnownStatus(status)) return null;
+  const content = statusContent(status, jobTitle);
   return {
     user_id: userId,
     type: "APPLICATION_UPDATE",
     job_id: jobId,
-    ...build(jobTitle ?? "this job"),
+    title: content.title,
+    message: content.alert,
   };
 }
