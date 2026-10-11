@@ -2,13 +2,11 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
-  const supabase = createClient();
 
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -27,23 +25,13 @@ export default function LoginPage() {
 
     async function checkExistingSession() {
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+        const response = await fetch("/api/me");
 
         if (!mounted) return;
 
-        if (session?.user) {
-          const role = session.user.app_metadata?.role;
-
-          if (role === "admin") {
-            router.replace("/dashboard");
-            return;
-          }
-
-          // If there is a session but the account is not admin,
-          // clear it so the user can login with the correct account.
-          await supabase.auth.signOut();
+        if (response.ok) {
+          router.replace("/dashboard");
+          return;
         }
       } catch (err) {
         console.error("Session check error:", err);
@@ -59,7 +47,7 @@ export default function LoginPage() {
     return () => {
       mounted = false;
     };
-  }, [router, supabase]);
+  }, [router]);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,38 +55,34 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    try {
+      const response = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
 
-    if (error) {
-      setError(error.message);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setError(data.error ?? "Invalid username or password.");
+        setLoading(false);
+        return;
+      }
+
+      /*
+       * IMPORTANT:
+       *
+       * Use replace() instead of push().
+       *
+       * This prevents /login from remaining as the previous
+       * browser history page after successful login.
+       */
+      router.replace("/dashboard");
+      router.refresh();
+    } catch (err) {
+      setError("Login failed. Please try again.");
       setLoading(false);
-      return;
     }
-
-    /*
-     * ADMIN CHECK
-     */
-    if (data.user?.app_metadata?.role !== "admin") {
-      await supabase.auth.signOut();
-
-      setError("This account is not an admin account.");
-      setLoading(false);
-      return;
-    }
-
-    /*
-     * IMPORTANT:
-     *
-     * Use replace() instead of push().
-     *
-     * This prevents /login from remaining as the previous
-     * browser history page after successful login.
-     */
-    router.replace("/dashboard");
-    router.refresh();
   }
 
   /*
@@ -271,27 +255,27 @@ export default function LoginPage() {
                 </div>
               )}
 
-              {/* EMAIL */}
+              {/* USERNAME */}
 
               <div>
 
                 <label
-                  htmlFor="email"
+                  htmlFor="username"
                   className="mb-2 block text-sm font-semibold text-slate-700"
                 >
-                  Email Address
+                  Username
                 </label>
 
                 <input
-                  id="email"
-                  type="email"
-                  value={email}
+                  id="username"
+                  type="text"
+                  value={username}
                   onChange={(event) =>
-                    setEmail(event.target.value)
+                    setUsername(event.target.value)
                   }
-                  placeholder="admin@example.com"
+                  placeholder="admin"
                   required
-                  autoComplete="email"
+                  autoComplete="username"
                   className="w-full border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#e30613] focus:ring-1 focus:ring-[#e30613]"
                 />
 

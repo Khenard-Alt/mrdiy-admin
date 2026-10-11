@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import Link from "next/link";
 
 type Job = {
   id: string;
@@ -35,7 +35,6 @@ const emptyForm: JobForm = {
 
 export default function JobsPage() {
   const router = useRouter();
-  const supabase = createClient();
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [search, setSearch] = useState("");
@@ -57,75 +56,31 @@ export default function JobsPage() {
     loadJobs();
   }, []);
 
-  useEffect(() => {
-    const channel = supabase
-      .channel("jobs-page-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "jobs",
-        },
-        () => {
-          loadJobs();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  async function checkAdmin() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      router.push("/login");
-      return false;
-    }
-
-    if (user.app_metadata?.role !== "admin") {
-      await supabase.auth.signOut();
-      router.push("/login");
-      return false;
-    }
-
-    return true;
-  }
-
   async function loadJobs() {
     setLoading(true);
     setError("");
 
-    const isAdmin = await checkAdmin();
+    try {
+      const response = await fetch("/api/jobs");
 
-    if (!isAdmin) {
+      if (response.status === 401) {
+        router.push("/login");
+        return;
+      }
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to load jobs.");
+      }
+
+      const data = await response.json();
+      setJobs((data.jobs ?? []) as Job[]);
+    } catch (err) {
+      console.error("Load jobs error:", err);
+      setError(err instanceof Error ? err.message : "Failed to load jobs.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const { data, error } = await supabase
-      .from("jobs")
-      .select(
-        "id, title, description, location, salary, status, created_at, salary_type"
-      )
-      .order("created_at", {
-        ascending: false,
-      });
-
-    if (error) {
-      console.error("Load jobs error:", error);
-      setError(error.message);
-      setLoading(false);
-      return;
-    }
-
-    setJobs((data ?? []) as Job[]);
-    setLoading(false);
   }
 
   function openAddModal() {
@@ -195,29 +150,30 @@ export default function JobsPage() {
 
     setSaving(true);
 
+    const payload = {
+      title: form.title.trim(),
+      description: form.description.trim(),
+      location: form.location.trim(),
+      salary: form.salary.trim(),
+      salary_type: form.salary_type,
+      status: form.status,
+    };
+
     /*
      * EDIT EXISTING JOB
-     *
-     * Uses Supabase RPC so the admin update
-     * is handled by the database function.
      */
     if (editingJob) {
-      const { error } = await supabase.rpc("admin_update_job", {
-        p_id: editingJob.id,
-        p_title: form.title.trim(),
-        p_description: form.description.trim(),
-        p_location: form.location.trim(),
-        p_salary: form.salary.trim(),
-        p_salary_type: form.salary_type,
-        p_status: form.status,
+      const response = await fetch("/api/jobs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editingJob.id, ...payload }),
       });
 
-      if (error) {
-        console.error("Update job error:", error);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        console.error("Update job error:", data.error);
 
-        setError(
-          `Failed to update job: ${error.message}`
-        );
+        setError(`Failed to update job: ${data.error ?? "Unknown error"}`);
 
         setSaving(false);
         return;
@@ -230,23 +186,17 @@ export default function JobsPage() {
      * CREATE NEW JOB
      */
     else {
-      const { error } = await supabase
-        .from("jobs")
-        .insert({
-          title: form.title.trim(),
-          description: form.description.trim(),
-          location: form.location.trim(),
-          salary: form.salary.trim(),
-          salary_type: form.salary_type,
-          status: form.status,
-        });
+      const response = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-      if (error) {
-        console.error("Create job error:", error);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        console.error("Create job error:", data.error);
 
-        setError(
-          `Failed to create job: ${error.message}`
-        );
+        setError(`Failed to create job: ${data.error ?? "Unknown error"}`);
 
         setSaving(false);
         return;
@@ -279,17 +229,15 @@ export default function JobsPage() {
     setError("");
     setSuccess("");
 
-    const { error } = await supabase
-      .from("jobs")
-      .delete()
-      .eq("id", job.id);
+    const response = await fetch(`/api/jobs?id=${encodeURIComponent(job.id)}`, {
+      method: "DELETE",
+    });
 
-    if (error) {
-      console.error("Delete job error:", error);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      console.error("Delete job error:", data.error);
 
-      setError(
-        `Failed to delete job: ${error.message}`
-      );
+      setError(`Failed to delete job: ${data.error ?? "Unknown error"}`);
 
       return;
     }
@@ -300,8 +248,7 @@ export default function JobsPage() {
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut();
-
+    await fetch("/api/logout", { method: "POST" });
     router.push("/login");
     router.refresh();
   }
@@ -402,11 +349,11 @@ export default function JobsPage() {
         {/* LOGO */}
 
         <div className="flex h-20 items-center border-b border-white/15 px-6">
-          <div className="flex h-14 w-44 items-center">
+          <div className="flex h-14 w-44 items-center overflow-hidden">
             <img
               src="/logo.png"
               alt="MR.DIY"
-              className="h-auto w-full object-contain"
+              className="h-full w-full object-contain"
             />
           </div>
         </div>
@@ -418,28 +365,33 @@ export default function JobsPage() {
             Main Menu
           </p>
 
-          <button
-            type="button"
-            onClick={() => router.push("/dashboard")}
+          <Link
+            href="/dashboard"
             className="flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
             Dashboard
-          </button>
+          </Link>
 
-          <button
-            type="button"
+          <Link
+            href="/jobs"
             className="mt-1 flex w-full border-l-4 border-white bg-white/15 px-6 py-3 text-left text-sm font-semibold"
           >
             Jobs
-          </button>
+          </Link>
 
-          <button
-            type="button"
-            onClick={() => router.push("/applications")}
+          <Link
+            href="/applications"
             className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
           >
             Applications
-          </button>
+          </Link>
+
+          <Link
+            href="/messages"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
+          >
+            Messages
+          </Link>
         </nav>
 
         {/* LOGOUT */}

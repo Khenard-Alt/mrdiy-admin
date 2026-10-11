@@ -2,13 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import Link from "next/link";
 
 type Application = {
   id: string;
   user_id: string | null;
   job_id: string | null;
-  applicant_id: string | null;
   resume_url: string | null;
   status: string | null;
   match_score: number | null;
@@ -41,7 +40,6 @@ type ApplicationRow = Application & {
 
 export default function ApplicationsPage() {
   const router = useRouter();
-  const supabase = createClient();
 
   const [applications, setApplications] = useState<ApplicationRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,152 +66,20 @@ export default function ApplicationsPage() {
     setError("");
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const response = await fetch("/api/applications");
 
-      if (!user) {
+      if (response.status === 401) {
         router.push("/login");
         return;
       }
 
-      const {
-        data: applicationData,
-        error: applicationError,
-      } = await supabase
-        .from("applications")
-        .select(`
-          id,
-          user_id,
-          job_id,
-          applicant_id,
-          resume_url,
-          status,
-          match_score,
-          created_at,
-          updated_at
-        `)
-        .order("created_at", {
-          ascending: false,
-        });
-
-      if (applicationError) {
-        throw new Error(applicationError.message);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to load applications.");
       }
 
-      const applicationRows =
-        (applicationData ?? []) as Application[];
-
-      if (applicationRows.length === 0) {
-        setApplications([]);
-        setLoading(false);
-        return;
-      }
-
-      // ========================================================
-      // LOAD PROFILES
-      // ========================================================
-
-      const profileIds = [
-        ...new Set(
-          applicationRows
-            .map((item) => item.user_id)
-            .filter(
-              (id): id is string => Boolean(id)
-            )
-        ),
-      ];
-
-      let profiles: Profile[] = [];
-
-      if (profileIds.length > 0) {
-        const {
-          data: profileData,
-          error: profileError,
-        } = await supabase
-          .from("profiles")
-          .select(`
-            id,
-            full_name,
-            email,
-            phone,
-            location,
-            resume_url,
-            resume_name,
-            resume_uploaded_at
-          `)
-          .in("id", profileIds);
-
-        if (profileError) {
-          throw new Error(profileError.message);
-        }
-
-        profiles = (profileData ?? []) as Profile[];
-      }
-
-      // ========================================================
-      // LOAD JOBS
-      // ========================================================
-
-      const jobIds = [
-        ...new Set(
-          applicationRows
-            .map((item) => item.job_id)
-            .filter(
-              (id): id is string => Boolean(id)
-            )
-        ),
-      ];
-
-      let jobs: Job[] = [];
-
-      if (jobIds.length > 0) {
-        const {
-          data: jobData,
-          error: jobError,
-        } = await supabase
-          .from("jobs")
-          .select(`
-            id,
-            title,
-            location,
-            salary
-          `)
-          .in("id", jobIds);
-
-        if (jobError) {
-          throw new Error(jobError.message);
-        }
-
-        jobs = (jobData ?? []) as Job[];
-      }
-
-      // ========================================================
-      // COMBINE DATA
-      // ========================================================
-
-      const combined: ApplicationRow[] =
-        applicationRows.map((application) => {
-          const profile =
-            profiles.find(
-              (item) =>
-                item.id === application.user_id
-            ) ?? null;
-
-          const job =
-            jobs.find(
-              (item) =>
-                item.id === application.job_id
-            ) ?? null;
-
-          return {
-            ...application,
-            profile,
-            job,
-          };
-        });
-
-      setApplications(combined);
+      const data = await response.json();
+      setApplications((data.applications ?? []) as ApplicationRow[]);
     } catch (err) {
       setError(
         err instanceof Error
@@ -232,31 +98,9 @@ export default function ApplicationsPage() {
   function getResumeUrl(
     application: ApplicationRow
   ) {
-    const resumeUrl =
-      application.resume_url ||
-      application.profile?.resume_url ||
-      null;
-
-    if (!resumeUrl) {
-      return null;
-    }
-
-    if (
-      resumeUrl.startsWith("http://") ||
-      resumeUrl.startsWith("https://")
-    ) {
-      return resumeUrl;
-    }
-
-    if (resumeUrl.startsWith("/")) {
-      return resumeUrl;
-    }
-
-    const { data } = supabase.storage
-      .from("resumes")
-      .getPublicUrl(resumeUrl);
-
-    return data.publicUrl;
+    // The /api/applications response already resolves stored paths to
+    // signed URLs server-side (the "resumes" bucket is private).
+    return application.resume_url || application.profile?.resume_url || null;
   }
 
   // ============================================================
@@ -271,99 +115,20 @@ export default function ApplicationsPage() {
     setError("");
 
     try {
-      // Get logged-in admin
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const response = await fetch("/api/applications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: applicationId, status: newStatus }),
+      });
 
-      if (!user) {
-        throw new Error("Admin session not found.");
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Failed to update application.");
       }
 
-      // Find the application
-      const application = applications.find(
-        (item) => item.id === applicationId
-      );
-
-      if (!application) {
-        throw new Error("Application not found.");
-      }
-
-      // Prevent duplicate messages when clicking the same status
-      const currentStatus =
-        application.status || "Pending";
-
-      const statusChanged =
-        currentStatus.toLowerCase() !==
-        newStatus.toLowerCase();
-
-      // Update application status
-      const { error: statusError } = await supabase
-        .from("applications")
-        .update({
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", applicationId);
-
-      if (statusError) {
-        throw new Error(statusError.message);
-      }
-
-      // ============================================================
-      // AUTOMATIC MESSAGE TO APPLICANT
-      // ============================================================
-
-      if (statusChanged && application.user_id) {
-        let messageBody = "";
-
-        if (newStatus === "Reviewed") {
-          messageBody =
-            `Dear Applicant\n\n` +
-            `Your application has been reviewed by our recruitment team. ` +
-            `We will continue evaluating your application and will provide ` +
-            `an update once a decision has been made.\n\n` +
-            `Thank you for your interest in MR.DIY.`;
-        }
-
-        if (newStatus === "Approved") {
-          messageBody =
-            `Congratulations!\n\n` +
-            `Your application has been approved by our recruitment team. ` +
-            `Please check your messages for further instructions regarding ` +
-            `the next steps.\n\n` +
-            `Thank you for your interest in MR.DIY.`;
-        }
-
-        if (newStatus === "Rejected") {
-          messageBody =
-            `Dear Applicant\n\n` +
-            `Thank you for your interest in MR.DIY. We appreciate the ` +
-            `opportunity to consider your application.\n\n` +
-            `After reviewing your application, we have decided to proceed ` +
-            `with other candidates whose qualifications more closely match ` +
-            `our current requirements.\n\n` +
-            `We wish you the best in your future endeavors.`;
-        }
-
-        // Save message only for Reviewed, Approved, or Rejected
-        if (messageBody) {
-          const { error: messageError } = await supabase
-            .from("messages")
-            .insert({
-              sender_id: user.id,
-              receiver_id: application.user_id,
-              job_id: application.job_id,
-              body: messageBody,
-              is_read: false,
-            });
-
-          if (messageError) {
-            throw new Error(
-              `Status updated, but message could not be sent: ${messageError.message}`
-            );
-          }
-        }
+      if (data.warning) {
+        throw new Error(data.warning);
       }
 
       // Update application list
@@ -404,8 +169,7 @@ export default function ApplicationsPage() {
   // ============================================================
 
   async function handleLogout() {
-    await supabase.auth.signOut();
-
+    await fetch("/api/logout", { method: "POST" });
     router.push("/login");
     router.refresh();
   }
@@ -537,12 +301,14 @@ export default function ApplicationsPage() {
 
         {/* LOGO */}
 
-        <div className="flex h-24 items-center justify-center border-b border-white/15 px-5">
-          <img
-            src="/logo.png"
-            alt="MR.DIY"
-            className="max-h-16 w-auto object-contain"
-          />
+        <div className="flex h-20 items-center border-b border-white/15 px-6">
+          <div className="flex h-14 w-44 items-center overflow-hidden">
+            <img
+              src="/logo.png"
+              alt="MR.DIY"
+              className="h-full w-full object-contain"
+            />
+          </div>
         </div>
 
         {/* MENU */}
@@ -552,32 +318,33 @@ export default function ApplicationsPage() {
             Main Menu
           </p>
 
-          <button
-            type="button"
-            onClick={() =>
-              router.push("/dashboard")
-            }
+          <Link
+            href="/dashboard"
             className="flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
           >
             Dashboard
-          </button>
+          </Link>
 
-          <button
-            type="button"
-            onClick={() =>
-              router.push("/jobs")
-            }
+          <Link
+            href="/jobs"
             className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
           >
             Jobs
-          </button>
+          </Link>
 
-          <button
-            type="button"
+          <Link
+            href="/applications"
             className="mt-1 flex w-full border-l-4 border-white bg-white/15 px-6 py-3 text-left text-sm font-semibold"
           >
             Applications
-          </button>
+          </Link>
+
+          <Link
+            href="/messages"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
+          >
+            Messages
+          </Link>
         </nav>
 
         {/* LOGOUT */}
@@ -601,13 +368,13 @@ export default function ApplicationsPage() {
 
         {/* HEADER */}
 
-        <header className="flex min-h-24 items-center border-b border-slate-200 bg-white px-6 lg:px-8">
+        <header className="sticky top-0 z-10 flex min-h-20 items-center border-b border-slate-200 bg-white px-6 lg:px-8">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
               MR.DIY Careers
             </p>
 
-            <h1 className="mt-1 text-2xl font-bold text-slate-900">
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
               Applications
             </h1>
           </div>
