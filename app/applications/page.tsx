@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import ApplicantReview from "./ApplicantReview";
 
 type Application = {
   id: string;
@@ -52,6 +53,34 @@ export default function ApplicationsPage() {
     useState<ApplicationRow | null>(null);
 
   const [updating, setUpdating] = useState(false);
+  const [emailNotice, setEmailNotice] = useState<{
+    status: "sent" | "failed" | "invalid" | "not_configured";
+    to: string | null;
+    error?: string;
+  } | null>(null);
+  const [reviewVersion, setReviewVersion] = useState(0);
+  const [emailCheck, setEmailCheck] = useState<{
+    state: "idle" | "checking" | "ok" | "failed" | "not_configured";
+    message?: string;
+  }>({ state: "idle" });
+
+  // Connects to the mail server and logs in, without sending an email.
+  async function checkEmailSetup() {
+    setEmailCheck({ state: "checking" });
+    try {
+      const response = await fetch("/api/email/verify");
+      const data = await response.json();
+      if (!data.configured) {
+        setEmailCheck({ state: "not_configured" });
+      } else if (data.ok) {
+        setEmailCheck({ state: "ok", message: data.from });
+      } else {
+        setEmailCheck({ state: "failed", message: data.error });
+      }
+    } catch {
+      setEmailCheck({ state: "failed", message: "Could not reach the server." });
+    }
+  }
 
   // ============================================================
   // LOAD APPLICATIONS
@@ -115,6 +144,7 @@ export default function ApplicationsPage() {
   ) {
     setUpdating(true);
     setError("");
+    setEmailNotice(null);
 
     try {
       const response = await fetch("/api/applications", {
@@ -132,6 +162,9 @@ export default function ApplicationsPage() {
       if (data.warning) {
         throw new Error(data.warning);
       }
+
+      setEmailNotice(data.email ?? null);
+      setReviewVersion((version) => version + 1); // reload the review panel's email log
 
       // Update application list
       setApplications((current) =>
@@ -186,14 +219,14 @@ export default function ApplicationsPage() {
     }
 
     try {
-      return new Date(date).toLocaleDateString(
-        "en-PH",
-        {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        }
-      );
+      // e.g. "Oct 11, 2026, 10:45 PM" (the viewer's local time)
+      return new Date(date).toLocaleString("en-PH", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
     } catch {
       return "—";
     }
@@ -911,7 +944,16 @@ export default function ApplicationsPage() {
               </section>
 
               {/* ==================================================
-                  RESUME
+                  PICTURE, MATCH BREAKDOWN, HIGHLIGHTED RESUME TEXT
+              ================================================== */}
+
+              <ApplicantReview
+                key={`${selectedApplication.id}-${reviewVersion}`}
+                applicationId={selectedApplication.id}
+              />
+
+              {/* ==================================================
+                  RESUME (ORIGINAL FILE, FOR DOUBLE-CHECKING)
               ================================================== */}
 
               <section className="mt-6 border border-slate-200 p-6">
@@ -1103,6 +1145,53 @@ export default function ApplicationsPage() {
                 {updating && (
                   <p className="mt-4 text-xs text-slate-500">
                     Updating application status...
+                  </p>
+                )}
+
+                <div className="mt-4 flex flex-wrap items-center gap-3 text-xs">
+                  <button
+                    type="button"
+                    onClick={checkEmailSetup}
+                    disabled={emailCheck.state === "checking"}
+                    className="border border-slate-300 px-3 py-2 font-semibold text-slate-700 hover:border-[#e30613] hover:text-[#e30613] disabled:opacity-50"
+                  >
+                    {emailCheck.state === "checking" ? "Checking…" : "Check email setup"}
+                  </button>
+                  {emailCheck.state === "ok" && (
+                    <span className="font-semibold text-green-700">
+                      Email is ready. Emails are sent from {emailCheck.message}.
+                    </span>
+                  )}
+                  {emailCheck.state === "not_configured" && (
+                    <span className="font-semibold text-amber-800">
+                      Not set up: add SMTP_HOST, SMTP_PORT, SMTP_USER and SMTP_PASS to .env.local, then restart.
+                    </span>
+                  )}
+                  {emailCheck.state === "failed" && (
+                    <span className="font-semibold text-red-700">
+                      Email setup problem: {emailCheck.message}
+                    </span>
+                  )}
+                </div>
+
+                {!updating && emailNotice && (
+                  <p
+                    className={`mt-4 border px-4 py-3 text-xs font-semibold ${
+                      emailNotice.status === "sent"
+                        ? "border-green-200 bg-green-50 text-green-700"
+                        : "border-amber-200 bg-amber-50 text-amber-800"
+                    }`}
+                  >
+                    {emailNotice.status === "sent" &&
+                      `Email sent to ${emailNotice.to}. The applicant was also notified in the app.`}
+                    {emailNotice.status === "invalid" &&
+                      `Email not sent: ${emailNotice.error ?? "invalid address"}${
+                        emailNotice.to ? ` (${emailNotice.to})` : ""
+                      } The applicant was still notified in the app.`}
+                    {emailNotice.status === "failed" &&
+                      `Email to ${emailNotice.to ?? "the applicant"} failed: ${emailNotice.error ?? "unknown error"}. The applicant was still notified in the app.`}
+                    {emailNotice.status === "not_configured" &&
+                      "Email is not set up yet (add SMTP settings to .env.local). The applicant was notified in the app only."}
                   </p>
                 )}
 

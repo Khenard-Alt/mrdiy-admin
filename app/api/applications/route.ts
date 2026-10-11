@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdminSession } from "@/lib/requireAdminSession";
+import { applicationStatusAlert, insertAlerts } from "@/lib/notifications";
+import { sendApplicantEmail, type EmailKind, type EmailResult } from "@/lib/email";
 
 export async function GET(request: NextRequest) {
   if (!requireAdminSession(request)) {
@@ -31,8 +33,8 @@ export async function GET(request: NextRequest) {
     profileIds.length > 0
       ? supabase
           .from("profiles")
-          .select("id, full_name, email, phone, location, resume_url, resume_name, resume_uploaded_at")
-          .in("id", profileIds)
+          .select("id:user_id, full_name, email, phone, location, resume_url, resume_name, resume_uploaded_at")
+          .in("user_id", profileIds)
       : Promise.resolve({ data: [], error: null }),
     jobIds.length > 0
       ? supabase.from("jobs").select("id, title, location, salary").in("id", jobIds)
@@ -130,7 +132,23 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
+  let emailResult: EmailResult | null = null;
+
   if (statusChanged && existing.user_id) {
+    // Per-user notification (shown in the app's bell); the message below is the longer HR note.
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("title")
+      .eq("id", existing.job_id)
+      .maybeSingle();
+    const statusAlert = applicationStatusAlert(
+      existing.user_id,
+      existing.job_id,
+      job?.title ?? null,
+      status
+    );
+    if (statusAlert) await insertAlerts(supabase, [statusAlert]);
+
     let messageBody = "";
 
     if (status === "Reviewed") {
@@ -154,6 +172,26 @@ export async function PATCH(request: NextRequest) {
         "We wish you the best in your future endeavors.";
     }
 
+    // The decisions are emailed too (Pending stays an in-app note). Uses the same text as the HR message.
+    if (statusAlert && status.toLowerCase() !== "pending") {
+      const { data: applicant } = await supabase
+        .from("profiles")
+        .select("email, full_name")
+        .eq("user_id", existing.user_id)
+        .maybeSingle();
+      const firstName = (applicant?.full_name ?? "").trim().split(/\s+/)[0];
+      emailResult = await sendApplicantEmail(supabase, {
+        userId: existing.user_id,
+        applicationId: existing.id,
+        to: applicant?.email,
+        subject: job?.title ? `${statusAlert.title}: ${job.title}` : statusAlert.title,
+        body: (messageBody || statusAlert.message).replace(/^Dear Applicant/, firstName ? `Dear ${firstName}` : "Dear Applicant"),
+        heading: statusAlert.title,
+        kind: status.toLowerCase() as EmailKind,
+        jobTitle: job?.title ?? null,
+      });
+    }
+
     if (messageBody) {
       const { error: messageError } = await supabase.from("messages").insert({
         sender_id: session.id,
@@ -165,11 +203,15 @@ export async function PATCH(request: NextRequest) {
 
       if (messageError) {
         return NextResponse.json(
-          { ok: true, warning: `Status updated, but message could not be sent: ${messageError.message}` }
+          {
+            ok: true,
+            email: emailResult,
+            warning: `Status updated, but message could not be sent: ${messageError.message}`,
+          }
         );
       }
     }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, email: emailResult });
 }

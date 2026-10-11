@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
       ? supabase.from("jobs").select("id, title").in("id", jobIds)
       : Promise.resolve({ data: [], error: null }),
     userIds.length > 0
-      ? supabase.from("profiles").select("id, full_name, email").in("id", userIds)
+      ? supabase.from("profiles").select("id:user_id, full_name, email").in("user_id", userIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
 

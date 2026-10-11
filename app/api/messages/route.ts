@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdminSession } from "@/lib/requireAdminSession";
+import { insertAlerts } from "@/lib/notifications";
 
 export async function GET(request: NextRequest) {
   const session = requireAdminSession(request);
@@ -31,8 +32,8 @@ export async function GET(request: NextRequest) {
   if (applicantIds.length > 0) {
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
-      .select("id, full_name, email")
-      .in("id", applicantIds);
+      .select("id:user_id, full_name, email")
+      .in("user_id", applicantIds);
 
     if (profileError) {
       return NextResponse.json({ error: profileError.message }, { status: 500 });
@@ -74,6 +75,17 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  // Also surface it in the applicant's notifications; the message itself is already saved.
+  await insertAlerts(supabase, [
+    {
+      user_id: receiverId,
+      type: "MESSAGE",
+      title: "New message from MR.DIY HR",
+      message: text.trim().length > 90 ? `${text.trim().slice(0, 90)}…` : text.trim(),
+      job_id: jobId ?? null,
+    },
+  ]);
 
   return NextResponse.json({ message: data });
 }

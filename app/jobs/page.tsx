@@ -13,11 +13,17 @@ type Job = {
   status: string | null;
   created_at: string | null;
   salary_type: string | null;
+  responsibilities: string | null;
+  requirements: string | null;
+  benefits: string | null;
 };
 
 type JobForm = {
   title: string;
   description: string;
+  responsibilities: string;
+  requirements: string;
+  benefits: string;
   location: string;
   salary: string;
   salary_type: string;
@@ -27,17 +33,23 @@ type JobForm = {
 const emptyForm: JobForm = {
   title: "",
   description: "",
+  responsibilities: "",
+  requirements: "",
+  benefits: "",
   location: "",
   salary: "",
   salary_type: "Monthly",
   status: "published",
 };
 
+const JOBS_PER_PAGE = 10;
+
 export default function JobsPage() {
   const router = useRouter();
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -101,6 +113,9 @@ export default function JobsPage() {
     setForm({
       title: job.title ?? "",
       description: job.description ?? "",
+      responsibilities: job.responsibilities ?? "",
+      requirements: job.requirements ?? "",
+      benefits: job.benefits ?? "",
       location: job.location ?? "",
       salary: job.salary ?? "",
       salary_type: job.salary_type ?? "Monthly",
@@ -153,6 +168,9 @@ export default function JobsPage() {
     const payload = {
       title: form.title.trim(),
       description: form.description.trim(),
+      responsibilities: form.responsibilities.trim(),
+      requirements: form.requirements.trim(),
+      benefits: form.benefits.trim(),
       location: form.location.trim(),
       salary: form.salary.trim(),
       salary_type: form.salary_type,
@@ -339,6 +357,18 @@ export default function JobsPage() {
     );
   });
 
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredJobs.length / JOBS_PER_PAGE)
+  );
+  // Clamp so deleting the last job on a page doesn't leave an empty page.
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * JOBS_PER_PAGE;
+  const pagedJobs = filteredJobs.slice(
+    pageStart,
+    pageStart + JOBS_PER_PAGE
+  );
+
   return (
     <main className="min-h-screen bg-[#f5f6f8] text-slate-900">
       {/* =========================
@@ -486,9 +516,10 @@ export default function JobsPage() {
                 <input
                   type="text"
                   value={search}
-                  onChange={(event) =>
-                    setSearch(event.target.value)
-                  }
+                  onChange={(event) => {
+                    setSearch(event.target.value);
+                    setPage(1);
+                  }}
                   placeholder="Search jobs..."
                   className="w-full border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#e30613]"
                 />
@@ -565,7 +596,7 @@ export default function JobsPage() {
                   </thead>
 
                   <tbody>
-                    {filteredJobs.map((job) => (
+                    {pagedJobs.map((job) => (
                       <tr
                         key={job.id}
                         className="border-b border-slate-100 last:border-0 transition hover:bg-slate-50"
@@ -653,6 +684,42 @@ export default function JobsPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* PAGINATION */}
+
+            {!loading && filteredJobs.length > 0 && (
+              <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-slate-500">
+                  Showing {pageStart + 1}–
+                  {pageStart + pagedJobs.length} of{" "}
+                  {filteredJobs.length} jobs
+                </p>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#e30613] hover:text-[#e30613] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-300 disabled:hover:text-slate-700"
+                  >
+                    Previous
+                  </button>
+
+                  <span className="px-2 text-xs font-medium text-slate-600">
+                    Page {currentPage} of {totalPages}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => setPage(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className="border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#e30613] hover:text-[#e30613] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-300 disabled:hover:text-slate-700"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             )}
           </section>
@@ -864,6 +931,36 @@ export default function JobsPage() {
                   className="w-full resize-none border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
                 />
               </div>
+
+              {/* RESPONSIBILITIES / REQUIREMENTS / BENEFITS (one item per line) */}
+
+              {(
+                [
+                  ["responsibilities", "Responsibilities"],
+                  ["requirements", "Requirements / Qualifications"],
+                  ["benefits", "Benefits"],
+                ] as const
+              ).map(([field, label]) => (
+                <div key={field} className="mt-5">
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    {label}
+                  </label>
+
+                  <textarea
+                    value={form[field]}
+                    onChange={(event) =>
+                      updateForm(field, event.target.value)
+                    }
+                    placeholder="One item per line"
+                    rows={5}
+                    className="w-full resize-none border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
+                  />
+
+                  <p className="mt-1 text-xs text-slate-400">
+                    Type one item per line. Each line is shown as a bullet to applicants.
+                  </p>
+                </div>
+              ))}
 
               {/* BUTTONS */}
 
