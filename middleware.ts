@@ -3,7 +3,7 @@ import { verifySessionCookie, COOKIE_NAME } from "@/lib/adminSession";
 
 export const runtime = "nodejs";
 
-const PROTECTED_PATHS = ["/dashboard", "/jobs", "/applications", "/messages"];
+const PROTECTED_PATHS = ["/dashboard", "/jobs", "/applications", "/messages", "/accounts", "/analytics"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -27,5 +27,12 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/jobs/:path*", "/applications/:path*", "/messages/:path*"],
+  matcher: [
+    "/dashboard/:path*",
+    "/jobs/:path*",
+    "/applications/:path*",
+    "/messages/:path*",
+    "/accounts/:path*",
+    "/analytics/:path*",
+  ],
 };

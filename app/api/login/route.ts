@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createSessionCookie, COOKIE_NAME } from "@/lib/adminSession";
+import { createSessionCookie, COOKIE_NAME, type AdminRole } from "@/lib/adminSession";
 
 export async function POST(request: NextRequest) {
   const { username, password } = await request.json();
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
 
   const { data: admin, error } = await supabase
     .from("admin_users")
-    .select("id, username, password, full_name, role")
+    .select("id, username, password, full_name, role, branch_id, is_active")
     .eq("username", username.trim())
     .maybeSingle();
 
@@ -21,18 +21,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid username or password." }, { status: 401 });
   }
 
+  if (admin.is_active === false) {
+    return NextResponse.json({ error: "This account has been disabled." }, { status: 403 });
+  }
+
+  const role = (admin.role ?? "hr_officer") as AdminRole;
+
   const cookieValue = createSessionCookie({
     id: admin.id,
     username: admin.username,
     fullName: admin.full_name ?? "HR Administrator",
-    role: admin.role ?? "admin",
+    role,
+    branchId: admin.branch_id ?? null,
   });
 
   const response = NextResponse.json({
     id: admin.id,
     username: admin.username,
     fullName: admin.full_name,
-    role: admin.role,
+    role,
+    branchId: admin.branch_id ?? null,
   });
 
   response.cookies.set(COOKIE_NAME, cookieValue, {

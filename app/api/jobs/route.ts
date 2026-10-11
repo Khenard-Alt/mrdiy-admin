@@ -31,14 +31,72 @@ export async function GET(request: NextRequest) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("jobs")
-    .select("id, title, description, responsibilities, requirements, benefits, location, salary, status, created_at, salary_type")
+    .select(
+      "id, title, description, responsibilities, requirements, benefits, location, salary, status, created_at, salary_type, openings, deadline, branch_id"
+    )
     .order("created_at", { ascending: false });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ jobs: data ?? [] });
+  const jobs = await autoCloseExpiredOrFilled(supabase, data ?? []);
+
+  return NextResponse.json({ jobs });
+}
+
+type JobRow = {
+  id: string;
+  status: string | null;
+  openings: number | null;
+  deadline: string | null;
+  [key: string]: unknown;
+};
+
+/**
+ * A published job automatically becomes Closed once its deadline has passed, or once
+ * enough applicants have been Hired to fill its openings. Checked lazily here (on each
+ * admin list load) instead of a cron job, so the mobile app's "published" filter picks
+ * up the change on its next fetch.
+ */
+async function autoCloseExpiredOrFilled(
+  supabase: ReturnType<typeof createAdminClient>,
+  jobs: JobRow[]
+): Promise<JobRow[]> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const pastDeadline = jobs.filter(
+    (job) => job.status === "published" && job.deadline && job.deadline < today
+  );
+
+  const limitedOpenings = jobs.filter(
+    (job) => job.status === "published" && job.openings !== null && job.openings !== undefined
+  );
+
+  let hiredCounts = new Map<string, number>();
+  if (limitedOpenings.length > 0) {
+    const { data: hired } = await supabase
+      .from("applications")
+      .select("job_id")
+      .eq("status", "Hired")
+      .in(
+        "job_id",
+        limitedOpenings.map((j) => j.id)
+      );
+    hiredCounts = (hired ?? []).reduce((map, row) => {
+      map.set(row.job_id, (map.get(row.job_id) ?? 0) + 1);
+      return map;
+    }, new Map<string, number>());
+  }
+
+  const filled = limitedOpenings.filter((job) => (hiredCounts.get(job.id) ?? 0) >= (job.openings ?? 0));
+
+  const toClose = [...new Set([...pastDeadline, ...filled].map((job) => job.id))];
+  if (toClose.length === 0) return jobs;
+
+  await supabase.from("jobs").update({ status: "closed" }).in("id", toClose);
+
+  return jobs.map((job) => (toClose.includes(job.id) ? { ...job, status: "closed" } : job));
 }
 
 export async function POST(request: NextRequest) {
@@ -61,6 +119,12 @@ export async function POST(request: NextRequest) {
       salary: body.salary,
       salary_type: body.salary_type,
       status: body.status,
+      job_type: body.jobType,
+      category: body.category,
+      level: body.level,
+      openings: body.openings || null,
+      deadline: body.deadline || null,
+      branch_id: body.branchId || null,
     })
     .select("*")
     .single();
@@ -107,6 +171,12 @@ export async function PATCH(request: NextRequest) {
       salary: body.salary,
       salary_type: body.salary_type,
       status: body.status,
+      job_type: body.jobType,
+      category: body.category,
+      level: body.level,
+      openings: body.openings || null,
+      deadline: body.deadline || null,
+      branch_id: body.branchId || null,
     })
     .eq("id", body.id)
     .select("*")

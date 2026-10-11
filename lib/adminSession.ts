@@ -3,11 +3,14 @@ import { createHmac, timingSafeEqual } from "crypto";
 const COOKIE_NAME = "admin_session";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
+export type AdminRole = "super_admin" | "hr_officer" | "branch_manager";
+
 type SessionPayload = {
   id: string;
   username: string;
   fullName: string;
-  role: string;
+  role: AdminRole;
+  branchId: string | null;
   exp: number;
 };
 
@@ -51,4 +54,9 @@ export function verifySessionCookie(cookieValue: string | undefined | null): Ses
   }
 }
 
+export function hasRole(session: SessionPayload | null, ...roles: AdminRole[]): boolean {
+  return session !== null && roles.includes(session.role);
+}
+
 export { COOKIE_NAME };
+export type { SessionPayload };

@@ -3,10 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import AdminAlertsBell from "@/components/AdminAlertsBell";
+import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 import ApplicantReview from "./ApplicantReview";
 import InterviewPanel from "./InterviewPanel";
 import RequirementsPanel from "./RequirementsPanel";
 import RankingPanel from "./RankingPanel";
+import HandoffPanel from "./HandoffPanel";
+import NotesPanel from "./NotesPanel";
 import {
   normalizeStatus,
   SETTABLE_STATUSES,
@@ -24,6 +28,21 @@ type Application = {
   match_score: number | null;
   created_at: string | null;
   updated_at: string | null;
+  assigned_to: string | null;
+  branch_id: string | null;
+  tags: string[];
+  transfer_status: string;
+};
+
+type Assignee = {
+  id: string;
+  full_name: string | null;
+  username: string;
+};
+
+type Branch = {
+  id: string;
+  name: string;
 };
 
 type Profile = {
@@ -47,6 +66,9 @@ type Job = {
 type ApplicationRow = Application & {
   profile: Profile | null;
   job: Job | null;
+  assignee: Assignee | null;
+  branch: Branch | null;
+  transferOfferBranch: Branch | null;
 };
 
 export default function ApplicationsPage() {
@@ -55,9 +77,11 @@ export default function ApplicationsPage() {
   const [applications, setApplications] = useState<ApplicationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [currentAdminId, setCurrentAdminId] = useState("");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [queueFilter, setQueueFilter] = useState<"all" | "mine" | "unassigned">("all");
 
   const [selectedApplication, setSelectedApplication] =
     useState<ApplicationRow | null>(null);
@@ -102,12 +126,15 @@ export default function ApplicationsPage() {
     setError("");
 
     try {
-      const response = await fetch("/api/applications");
+      const [meResponse, response] = await Promise.all([fetch("/api/me"), fetch("/api/applications")]);
 
-      if (response.status === 401) {
+      if (response.status === 401 || meResponse.status === 401) {
         router.push("/login");
         return;
       }
+
+      const me = await meResponse.json().catch(() => ({}));
+      setCurrentAdminId(me.session?.id ?? "");
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -132,6 +159,18 @@ export default function ApplicationsPage() {
     loadApplications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useRealtimeRefresh(["applications"], loadApplications);
+
+  // Keep the open modal in sync whenever the list reloads (manual refresh,
+  // realtime signal, or a hand-off/transfer-offer action elsewhere).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedApplication((current) => {
+      if (!current) return current;
+      return applications.find((item) => item.id === current.id) ?? current;
+    });
+  }, [applications]);
 
   // ============================================================
   // RESUME URL
@@ -308,12 +347,19 @@ export default function ApplicationsPage() {
         statusFilter === "All" ||
         normalizeStatus(application.status) === statusFilter;
 
-      return matchesSearch && matchesStatus;
+      const matchesQueue =
+        queueFilter === "all" ||
+        (queueFilter === "mine" && application.assigned_to === currentAdminId) ||
+        (queueFilter === "unassigned" && !application.assigned_to);
+
+      return matchesSearch && matchesStatus && matchesQueue;
     });
   }, [
     applications,
     search,
     statusFilter,
+    queueFilter,
+    currentAdminId,
   ]);
 
   // ============================================================
@@ -375,6 +421,20 @@ export default function ApplicationsPage() {
           >
             Messages
           </Link>
+
+          <Link
+            href="/analytics"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
+          >
+            Analytics
+          </Link>
+
+          <Link
+            href="/accounts"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
+          >
+            Accounts
+          </Link>
         </nav>
 
         {/* LOGOUT */}
@@ -398,7 +458,7 @@ export default function ApplicationsPage() {
 
         {/* HEADER */}
 
-        <header className="sticky top-0 z-10 flex min-h-20 items-center border-b border-slate-200 bg-white px-6 lg:px-8">
+        <header className="sticky top-0 z-10 flex min-h-20 items-center justify-between border-b border-slate-200 bg-white px-6 lg:px-8">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
               MR.DIY Careers
@@ -408,6 +468,7 @@ export default function ApplicationsPage() {
               Applications
             </h1>
           </div>
+          <AdminAlertsBell />
         </header>
 
         {/* CONTENT */}
@@ -467,6 +528,38 @@ export default function ApplicationsPage() {
               }}
             />
           )}
+
+          {/* QUEUE TABS */}
+          <section className="mb-6 flex gap-2 border-b border-slate-200">
+            {([
+              ["all", "All"],
+              ["mine", "My Queue"],
+              ["unassigned", "Unassigned"],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setQueueFilter(value)}
+                className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+                  queueFilter === value
+                    ? "border-[#e30613] text-[#e30613]"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                {label}
+                {value === "mine" && (
+                  <span className="ml-1.5 text-xs text-slate-400">
+                    ({applications.filter((a) => a.assigned_to === currentAdminId).length})
+                  </span>
+                )}
+                {value === "unassigned" && (
+                  <span className="ml-1.5 text-xs text-slate-400">
+                    ({applications.filter((a) => !a.assigned_to).length})
+                  </span>
+                )}
+              </button>
+            ))}
+          </section>
 
           <section className="mb-6 border border-slate-200 bg-white p-4 shadow-sm">
 
@@ -1156,6 +1249,52 @@ export default function ApplicationsPage() {
                 )}
 
               </section>
+
+              {/* ==================================================
+                  HAND-OFF
+              ================================================== */}
+
+              <HandoffPanel
+                key={`${selectedApplication.id}-handoff`}
+                applicationId={selectedApplication.id}
+                assignedTo={selectedApplication.assigned_to}
+                assigneeName={selectedApplication.assignee?.full_name ?? selectedApplication.assignee?.username ?? null}
+                branchName={selectedApplication.branch?.name ?? null}
+                currentAdminId={currentAdminId}
+                transferStatus={selectedApplication.transfer_status}
+                transferOfferBranchName={selectedApplication.transferOfferBranch?.name ?? null}
+                onAssigned={(assignedTo) => {
+                  setApplications((current) =>
+                    current.map((item) =>
+                      item.id === selectedApplication.id ? { ...item, assigned_to: assignedTo } : item
+                    )
+                  );
+                  setSelectedApplication((current) =>
+                    current && current.id === selectedApplication.id ? { ...current, assigned_to: assignedTo } : current
+                  );
+                }}
+                onTransferOffered={() => {
+                  loadApplications();
+                }}
+              />
+
+              {/* ==================================================
+                  NOTES & TAGS
+              ================================================== */}
+
+              <NotesPanel
+                key={`${selectedApplication.id}-notes`}
+                applicationId={selectedApplication.id}
+                tags={selectedApplication.tags ?? []}
+                onTagsChange={(tags) => {
+                  setApplications((current) =>
+                    current.map((item) => (item.id === selectedApplication.id ? { ...item, tags } : item))
+                  );
+                  setSelectedApplication((current) =>
+                    current && current.id === selectedApplication.id ? { ...current, tags } : current
+                  );
+                }}
+              />
 
               {/* ==================================================
                   INTERVIEW

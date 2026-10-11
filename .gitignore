@@ -30,8 +30,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files & temp secrets
+.env
+.env.local
+.env.*
+supabase/.temp/
 
 # vercel
 .vercel
@@ -39,3 +42,4 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.push_webhook_secret.txt

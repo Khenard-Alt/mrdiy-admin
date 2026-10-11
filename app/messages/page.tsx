@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import AdminAlertsBell from "@/components/AdminAlertsBell";
+import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 
 type MessageRow = {
   id: string;
@@ -92,6 +94,8 @@ export default function MessagesPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useRealtimeRefresh(["messages"], () => loadMessages());
 
   const threads = useMemo<Thread[]>(() => {
     if (!adminId) return [];
@@ -246,6 +250,20 @@ export default function MessagesPage() {
           >
             Messages
           </Link>
+
+          <Link
+            href="/analytics"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
+          >
+            Analytics
+          </Link>
+
+          <Link
+            href="/accounts"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
+          >
+            Accounts
+          </Link>
         </nav>
 
         <div className="border-t border-white/15 p-4">
@@ -261,13 +279,14 @@ export default function MessagesPage() {
 
       {/* MAIN */}
       <div className="lg:ml-60">
-        <header className="sticky top-0 z-10 flex min-h-20 items-center border-b border-slate-200 bg-white px-6 lg:px-8">
+        <header className="sticky top-0 z-10 flex min-h-20 items-center justify-between border-b border-slate-200 bg-white px-6 lg:px-8">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
               MR.DIY Careers
             </p>
             <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">Messages</h1>
           </div>
+          <AdminAlertsBell />
         </header>
 
         <div className="p-5 sm:p-6 lg:p-8">

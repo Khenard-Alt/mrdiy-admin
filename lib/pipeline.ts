@@ -14,6 +14,7 @@ export const STATUS_VALUES = [
   "Hired",
   "Rejected",
   "On Hold",
+  "Withdrawn",
 ] as const;
 
 export type Status = (typeof STATUS_VALUES)[number];
@@ -35,6 +36,7 @@ const LABELS: Record<Status, string> = {
   Hired: "Hired",
   Rejected: "Rejected",
   "On Hold": "On Hold",
+  Withdrawn: "Withdrawn",
 };
 
 // Older rows and other names are mapped to the pipeline names.
@@ -80,13 +82,20 @@ export function statusClasses(raw: string | null | undefined): string {
       return "border-indigo-200 bg-indigo-50 text-indigo-700";
     case "On Hold":
       return "border-slate-300 bg-slate-100 text-slate-600";
+    case "Withdrawn":
+      return "border-slate-300 bg-slate-50 text-slate-500";
     default:
       return "border-yellow-200 bg-yellow-50 text-yellow-700";
   }
 }
 
-/** Statuses HR can set with a button. "Interview Scheduled" is set by scheduling an interview. */
-export const SETTABLE_STATUSES: Status[] = STATUS_VALUES.filter((s) => s !== "Interview Scheduled");
+/**
+ * Statuses HR can set with a button. "Interview Scheduled" is set by scheduling an
+ * interview, and "Withdrawn" is set by the applicant withdrawing, not by HR.
+ */
+export const SETTABLE_STATUSES: Status[] = STATUS_VALUES.filter(
+  (s) => s !== "Interview Scheduled" && s !== "Withdrawn"
+);
 
 // ---------------------------------------------------------------------------
 // Wording of the notification, message and email for each status
@@ -156,6 +165,12 @@ export function statusContent(raw: string, jobTitle: string | null, firstName?: 
         note:
           `${hello}\n\nYour application for ${job} is on hold for now. This does not mean it was declined. ` +
           "We will update you as soon as there is progress.\n\nThank you for your patience.",
+      };
+    case "Withdrawn":
+      return {
+        title: "Application withdrawn",
+        alert: `Your application for ${job} has been withdrawn.`,
+        note: `${hello}\n\nYou have withdrawn your application for ${job}. You're welcome to apply again anytime.`,
       };
     default:
       return {

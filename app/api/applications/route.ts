@@ -11,16 +11,29 @@ import {
 import { sendApplicantEmail, type EmailKind, type EmailResult } from "@/lib/email";
 
 export async function GET(request: NextRequest) {
-  if (!requireAdminSession(request)) {
+  const session = requireAdminSession(request);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const supabase = createAdminClient();
 
-  const { data: applicationData, error: applicationError } = await supabase
+  let query = supabase
     .from("applications")
-    .select("id, user_id, job_id, resume_url, status, match_score, created_at, updated_at")
+    .select(
+      "id, user_id, job_id, resume_url, status, match_score, created_at, updated_at, assigned_to, branch_id, tags, transfer_status, transfer_offer_branch_id"
+    )
     .order("created_at", { ascending: false });
+
+  // A branch manager only ever sees applications routed to their own branch.
+  if (session.role === "branch_manager") {
+    if (!session.branchId) {
+      return NextResponse.json({ applications: [] });
+    }
+    query = query.eq("branch_id", session.branchId);
+  }
+
+  const { data: applicationData, error: applicationError } = await query;
 
   if (applicationError) {
     return NextResponse.json({ error: applicationError.message }, { status: 500 });
@@ -34,8 +47,16 @@ export async function GET(request: NextRequest) {
 
   const profileIds = [...new Set(applicationRows.map((item) => item.user_id).filter(Boolean))];
   const jobIds = [...new Set(applicationRows.map((item) => item.job_id).filter(Boolean))];
+  const assigneeIds = [...new Set(applicationRows.map((item) => item.assigned_to).filter(Boolean))];
+  const branchIds = [
+    ...new Set(
+      [...applicationRows.map((item) => item.branch_id), ...applicationRows.map((item) => item.transfer_offer_branch_id)].filter(
+        Boolean
+      )
+    ),
+  ];
 
-  const [profilesResult, jobsResult] = await Promise.all([
+  const [profilesResult, jobsResult, assigneesResult, branchesResult] = await Promise.all([
     profileIds.length > 0
       ? supabase
           .from("profiles")
@@ -44,6 +65,12 @@ export async function GET(request: NextRequest) {
       : Promise.resolve({ data: [], error: null }),
     jobIds.length > 0
       ? supabase.from("jobs").select("id, title, location, salary").in("id", jobIds)
+      : Promise.resolve({ data: [], error: null }),
+    assigneeIds.length > 0
+      ? supabase.from("admin_users").select("id, full_name, username").in("id", assigneeIds)
+      : Promise.resolve({ data: [], error: null }),
+    branchIds.length > 0
+      ? supabase.from("branches").select("id, name").in("id", branchIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -57,6 +84,8 @@ export async function GET(request: NextRequest) {
 
   const profiles = profilesResult.data ?? [];
   const jobs = jobsResult.data ?? [];
+  const assignees = assigneesResult.data ?? [];
+  const branches = branchesResult.data ?? [];
 
   // Resume files live in a private storage bucket — resolve each stored
   // path to a short-lived signed URL the browser can actually load.
@@ -96,6 +125,9 @@ export async function GET(request: NextRequest) {
         ? { ...profile, resume_url: resolveResumeUrl(profile.resume_url) }
         : null,
       job: jobs.find((item) => item.id === application.job_id) ?? null,
+      assignee: assignees.find((item) => item.id === application.assigned_to) ?? null,
+      branch: branches.find((item) => item.id === application.branch_id) ?? null,
+      transferOfferBranch: branches.find((item) => item.id === application.transfer_offer_branch_id) ?? null,
     };
   });
 
@@ -109,9 +141,21 @@ export async function PATCH(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { id, status } = body;
+  const { id, status, tags } = body;
 
-  if (!id || !status) {
+  if (!id) {
+    return NextResponse.json({ error: "Application id is required." }, { status: 400 });
+  }
+
+  // Tag-only update (no status change) — used by the Notes & Tags panel.
+  if (tags !== undefined && status === undefined) {
+    const supabase = createAdminClient();
+    const { error: tagError } = await supabase.from("applications").update({ tags }).eq("id", id);
+    if (tagError) return NextResponse.json({ error: tagError.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (!status) {
     return NextResponse.json({ error: "Application id and status are required." }, { status: 400 });
   }
 
@@ -132,12 +176,16 @@ export async function PATCH(request: NextRequest) {
 
   const { data: existing, error: fetchError } = await supabase
     .from("applications")
-    .select("id, user_id, job_id, status")
+    .select("id, user_id, job_id, status, branch_id")
     .eq("id", id)
     .maybeSingle();
 
   if (fetchError || !existing) {
     return NextResponse.json({ error: fetchError?.message ?? "Application not found." }, { status: 404 });
+  }
+
+  if (session.role === "branch_manager" && existing.branch_id !== session.branchId) {
+    return NextResponse.json({ error: "This application is not in your branch." }, { status: 403 });
   }
 
   const statusChanged = normalizeStatus(existing.status) !== next;
@@ -149,6 +197,15 @@ export async function PATCH(request: NextRequest) {
 
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
+  }
+
+  if (statusChanged) {
+    await supabase.from("application_events").insert({
+      application_id: id,
+      actor_id: session.id,
+      type: "status",
+      detail: `${existing.status ?? "Pending"} → ${next}`,
+    });
   }
 
   const warnings: string[] = [];

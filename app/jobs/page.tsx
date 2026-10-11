@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import AdminAlertsBell from "@/components/AdminAlertsBell";
+import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 
 type Job = {
   id: string;
@@ -16,6 +18,17 @@ type Job = {
   responsibilities: string | null;
   requirements: string | null;
   benefits: string | null;
+  job_type?: string | null;
+  category?: string | null;
+  level?: string | null;
+  openings: number | null;
+  deadline: string | null;
+  branch_id: string | null;
+};
+
+type Branch = {
+  id: string;
+  name: string;
 };
 
 type JobForm = {
@@ -28,6 +41,12 @@ type JobForm = {
   salary: string;
   salary_type: string;
   status: string;
+  jobType: string;
+  category: string;
+  level: string;
+  openings: string;
+  deadline: string;
+  branchId: string;
 };
 
 const emptyForm: JobForm = {
@@ -40,6 +59,12 @@ const emptyForm: JobForm = {
   salary: "",
   salary_type: "Monthly",
   status: "published",
+  jobType: "Full-time",
+  category: "",
+  level: "",
+  openings: "",
+  deadline: "",
+  branchId: "",
 };
 
 const JOBS_PER_PAGE = 10;
@@ -48,6 +73,7 @@ export default function JobsPage() {
   const router = useRouter();
 
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
@@ -68,6 +94,8 @@ export default function JobsPage() {
     loadJobs();
   }, []);
 
+  useRealtimeRefresh(["jobs"], loadJobs);
+
   async function loadJobs() {
     setLoading(true);
     setError("");
@@ -87,6 +115,12 @@ export default function JobsPage() {
 
       const data = await response.json();
       setJobs((data.jobs ?? []) as Job[]);
+
+      const branchesResponse = await fetch("/api/branches");
+      if (branchesResponse.ok) {
+        const branchesData = await branchesResponse.json();
+        setBranches(branchesData.branches ?? []);
+      }
     } catch (err) {
       console.error("Load jobs error:", err);
       setError(err instanceof Error ? err.message : "Failed to load jobs.");
@@ -120,6 +154,12 @@ export default function JobsPage() {
       salary: job.salary ?? "",
       salary_type: job.salary_type ?? "Monthly",
       status: job.status ?? "published",
+      jobType: job.job_type && job.job_type !== "Not specified" ? job.job_type : "Full-time",
+      category: job.category && job.category !== "Not specified" ? job.category : "",
+      level: job.level && job.level !== "Not specified" ? job.level : "",
+      openings: job.openings?.toString() ?? "",
+      deadline: job.deadline ?? "",
+      branchId: job.branch_id ?? "",
     });
 
     setError("");
@@ -175,6 +215,12 @@ export default function JobsPage() {
       salary: form.salary.trim(),
       salary_type: form.salary_type,
       status: form.status,
+      jobType: form.jobType,
+      category: form.category.trim(),
+      level: form.level.trim(),
+      openings: form.openings ? Number(form.openings) : null,
+      deadline: form.deadline || null,
+      branchId: form.branchId || null,
     };
 
     /*
@@ -262,6 +308,36 @@ export default function JobsPage() {
 
     setSuccess("Job deleted successfully.");
 
+    await loadJobs();
+  }
+
+  async function handleDuplicate(job: Job) {
+    setError("");
+    setSuccess("");
+
+    const targetBranchId = branches.length > 0 ? window.prompt(
+      `Duplicate "${job.title}" to which branch?\n\n` +
+        branches.map((b, i) => `${i + 1}. ${b.name}`).join("\n") +
+        "\n\nEnter the number, or leave blank for no branch:"
+    ) : null;
+
+    const branch = targetBranchId
+      ? branches[Number(targetBranchId) - 1]
+      : undefined;
+
+    const response = await fetch("/api/jobs/duplicate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: job.id, branchId: branch?.id, location: branch?.name }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(`Failed to duplicate job: ${data.error ?? "Unknown error"}`);
+      return;
+    }
+
+    setSuccess("Job duplicated as a draft. Edit it to adjust details.");
     await loadJobs();
   }
 
@@ -422,6 +498,20 @@ export default function JobsPage() {
           >
             Messages
           </Link>
+
+          <Link
+            href="/analytics"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
+          >
+            Analytics
+          </Link>
+
+          <Link
+            href="/accounts"
+            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
+          >
+            Accounts
+          </Link>
         </nav>
 
         {/* LOGOUT */}
@@ -444,7 +534,7 @@ export default function JobsPage() {
       <div className="lg:ml-60">
         {/* HEADER */}
 
-        <header className="sticky top-0 z-10 flex min-h-20 items-center border-b border-slate-200 bg-white px-6 lg:px-8">
+        <header className="sticky top-0 z-10 flex min-h-20 items-center justify-between border-b border-slate-200 bg-white px-6 lg:px-8">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
               MR.DIY Careers
@@ -454,6 +544,7 @@ export default function JobsPage() {
               Jobs
             </h1>
           </div>
+          <AdminAlertsBell />
         </header>
 
         {/* PAGE CONTENT */}
@@ -667,6 +758,14 @@ export default function JobsPage() {
                               className="border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#e30613] hover:text-[#e30613]"
                             >
                               Edit
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDuplicate(job)}
+                              className="border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#e30613] hover:text-[#e30613]"
+                            >
+                              Duplicate
                             </button>
 
                             <button
@@ -909,6 +1008,89 @@ export default function JobsPage() {
                     Closed
                   </option>
                 </select>
+              </div>
+
+              {/* JOB TYPE / CATEGORY / LEVEL */}
+
+              <div className="mt-5 grid gap-5 sm:grid-cols-3">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">Job Type</label>
+                  <select
+                    value={form.jobType}
+                    onChange={(event) => updateForm("jobType", event.target.value)}
+                    className="w-full border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-[#e30613]"
+                  >
+                    <option value="Full-time">Full-time</option>
+                    <option value="Part-time">Part-time</option>
+                    <option value="Contractual">Contractual</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">Category</label>
+                  <input
+                    type="text"
+                    value={form.category}
+                    onChange={(event) => updateForm("category", event.target.value)}
+                    placeholder="e.g. Retail"
+                    className="w-full border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">Level</label>
+                  <input
+                    type="text"
+                    value={form.level}
+                    onChange={(event) => updateForm("level", event.target.value)}
+                    placeholder="e.g. Entry Level"
+                    className="w-full border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
+                  />
+                </div>
+              </div>
+
+              {/* OPENINGS / DEADLINE / BRANCH */}
+
+              <div className="mt-5 grid gap-5 sm:grid-cols-3">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">Openings</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={form.openings}
+                    onChange={(event) => updateForm("openings", event.target.value)}
+                    placeholder="e.g. 2"
+                    className="w-full border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
+                  />
+                  <p className="mt-1 text-xs text-slate-400">Auto-closes once this many are Hired.</p>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">Deadline</label>
+                  <input
+                    type="date"
+                    value={form.deadline}
+                    onChange={(event) => updateForm("deadline", event.target.value)}
+                    className="w-full border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
+                  />
+                  <p className="mt-1 text-xs text-slate-400">Auto-closes after this date.</p>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">Branch</label>
+                  <select
+                    value={form.branchId}
+                    onChange={(event) => updateForm("branchId", event.target.value)}
+                    className="w-full border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-[#e30613]"
+                  >
+                    <option value="">No branch</option>
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {branch.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {/* DESCRIPTION */}
