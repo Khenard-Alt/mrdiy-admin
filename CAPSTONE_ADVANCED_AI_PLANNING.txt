@@ -1,0 +1,172 @@
+================================================================================
+MR.D.I.Y. CAREERS — ADVANCED AI/ML & PRE-EMPLOYMENT PLANNING SPECIFICATION
+================================================================================
+
+PROJECT: MR.D.I.Y. Careers Capstone Application
+MODULES COVERED: Android Mobile App, Admin Web Dashboard (Next.js), Supabase Backend, ML Matching Engine
+DOCUMENT PURPOSE: Comprehensive Engineering Blueprint for Advanced AI/ML & Onboarding Features
+
+================================================================================
+SECTION 1: PRE-EMPLOYMENT STEPS & ONBOARDING CHECKLIST WORKFLOW
+================================================================================
+
+1.1 OBJECTIVE:
+    Provide an interactive pre-employment onboarding workflow for candidates who
+    are "Shortlisted" or "Hired", guiding them through required pre-employment
+    documents and government compliance steps before day 1 of work.
+
+1.2 REQUIREMENTS CHECKLIST:
+    - SSS Number / E-1 Form
+    - PhilHealth Member Data Record (MDR)
+    - Pag-IBIG MID Number / Member Data Form
+    - NBI Clearance / Police Clearance
+    - Pre-Employment Medical Exam / Health Permit
+    - BIR Form 1902 / TIN
+    - Signed Employment Contract
+
+1.3 DATA SCHEMA (Supabase PostgreSQL):
+    Table Name: public.pre_employment_requirements
+    Columns:
+    - id (UUID, Primary Key)
+    - user_id (TEXT, Foreign Key -> profiles.user_id)
+    - application_id (UUID, Foreign Key -> applications.id)
+    - requirement_name (TEXT, e.g., 'NBI Clearance')
+    - status (TEXT: 'Pending', 'Uploaded', 'Verified', 'Rejected')
+    - document_url (TEXT)
+    - updated_at (TIMESTAMPTZ)
+
+1.4 MOBILE APP INTEGRATION (Android Kotlin):
+    - UI Fragment: PreEmploymentFragment.kt / ApplicationsFragment.kt
+    - Progress Bar: "Requirements Completed: 4 / 7 (57%)"
+    - Status Badges: Color-coded status for each requirement item.
+    - File Picker: Upload PDF/Image for each requirement.
+
+1.5 ADMIN WEB INTEGRATION (Next.js):
+    - Page: /applications/[id]/requirements
+    - HR Actions: Inspect uploaded government document PDFs/Images.
+    - Status Controls: Click to 'Verify' or 'Reject' with feedback notes.
+
+================================================================================
+SECTION 2: HIRING VELOCITY ESTIMATOR & STRENGTHS/WEAKNESSES ML DIAGNOSTIC
+================================================================================
+
+2.1 OBJECTIVE:
+    Provide predictive hiring intelligence showing estimated days to hire,
+    accompanied by a structured ML diagnostic breakdown of candidate strengths
+    and skill gaps.
+
+2.2 HIRING VELOCITY ESTIMATOR ALGORITHM:
+    - Base Hiring Timeline: 7 Business Days
+    - Adjustments:
+      * Match Score >= 85%: -2 Days (High urgency hire)
+      * Complete Profile & Uploaded Resume: -1 Day
+      * Complete Pre-Employment Documents: -1 Day
+      * Lacks core skills (< 50% match): +3 Days
+      * Low experience level mismatch: +2 Days
+    - Output Format: "Estimated Hiring Velocity: 2 - 4 Business Days"
+
+2.3 STRENGTHS AND WEAKNESSES ML DIAGNOSTIC ENGINE:
+    Class Name: CandidateDiagnosticEngine.kt
+
+    A. STRENGTHS EXTRACTION (Mga Kasanayan at Bentahe):
+       - Core Skill Matches: Matches between candidate skills and job requirements.
+       - Experience Fit: Candidate years of experience vs required level.
+       - Geographic Fit: Lives within Metro Manila branch boundary.
+       - Profile Completeness: Pre-employment compliance ready.
+       - Example Outputs:
+         [+] "Strong Cash Handling & POS expertise (3+ years)"
+         [+] "High TF-IDF similarity in Store Management & Inventory Auditing"
+         [+] "Location match: Pasig City (Branch Proximity)"
+
+    B. WEAKNESSES / SKILL GAPS (Mga Kulang na Kasanayan):
+       - Missing Core Skills: Key requirements listed in job description missing from candidate profile.
+       - Experience Gap: Insufficient years of experience for senior roles.
+       - Missing Certifications: e.g., Forklift license, First Aid certification.
+       - Example Outputs:
+         [-] "Lacks listed requirement: Forklift Operation Certification"
+         [-] "No prior experience listed in Visual Merchandising"
+         [-] "Incomplete pre-employment NBI Clearance"
+
+================================================================================
+SECTION 3: EXPLAINABLE AI (XAI) RANKING EXPLANATION ENGINE
+================================================================================
+
+3.1 OBJECTIVE:
+    Provide transparent, human-readable explanations detailing WHY a candidate
+    was ranked at a specific position and match percentage.
+
+3.2 XAI EXPLANATION ENGINE SPECIFICATION:
+    Class Name: ExplainableRankingEngine.kt
+
+    Inputs:
+    - UserProfile (skills, experience, headline, location, resumeText)
+    - Job (title, category, level, aboutRole, requirements)
+    - MatchResult (matchScore, vectorSimilarity)
+
+    Generated Explanation Template:
+    "Candidate [Name] is ranked at #[Rank] with a [Score]% Match for [Job Title].
+     This ranking is driven by a [Similarity]% text similarity in [Category] roles,
+     matching [MatchedCount] out of [TotalReqs] primary job requirements ([SkillsList]).
+     Candidate experience of [Years] years aligns with the [Level] requirement."
+
+3.3 UI DISPLAY:
+    - Mobile App: Expandable "Why this match?" card in RecommendedJobsFragment.kt and JobDetailFragment.kt.
+    - Admin Web: Candidate Ranking Breakdown card in /applications page.
+
+================================================================================
+SECTION 4: AI JOB DESCRIPTION GENERATOR FOR ADMIN WEB PORTAL
+================================================================================
+
+4.1 OBJECTIVE:
+    Assist HR Administrators when creating or editing job postings in the Admin
+    Web Portal (`mrdiy-admin`) by automatically generating optimized, retail-ready
+    job descriptions based on the specified job title.
+
+4.2 FUNCTIONALITY IN ADMIN WEB PORTAL (`mrdiy-admin/app/jobs/page.tsx`):
+    - UI Element: "✨ Generate AI Description" button next to Description field.
+    - Input: Job Title (e.g., "Store Supervisor", "Warehouse Crew", "Cashier", "HR Officer")
+    - Generator Engine: Local Retail Job Template Generator / OpenAI or Gemini API integration.
+
+4.3 RETAIL JOB GENERATION TEMPLATES & STRUCTURAL OUTPUT:
+
+    Example Output for "Store Supervisor":
+    ----------------------------------------------------------------------------
+    ABOUT THE ROLE:
+    We are seeking a dedicated and energetic Store Supervisor to oversee daily
+    retail operations at MR.D.I.Y. Philippines. You will lead store staff,
+    ensure high customer satisfaction, monitor sales targets, and maintain
+    inventory accuracy.
+
+    KEY RESPONSIBILITIES:
+    - Supervise store staff, POS cashiering, and daily floor operations.
+    - Monitor inventory levels, stock receiving, and visual merchandising.
+    - Handle customer inquiries and resolve escalations professionally.
+    - Train and coach store associates on product knowledge and customer service.
+    - Ensure store compliance with health, safety, and security standards.
+
+    REQUIREMENTS:
+    - Bachelor's degree or High School Diploma with relevant experience.
+    - At least 2 years of supervisory experience in retail or customer service.
+    - Strong leadership, communication, and problem-solving skills.
+    - Proficient in POS systems, cash handling, and MS Office.
+
+    BENEFITS:
+    - Competitive salary package with performance bonuses.
+    - Government mandatory benefits (SSS, PhilHealth, Pag-IBIG).
+    - Employee discounts across all MR.D.I.Y. product categories.
+    - Clear career growth and promotion opportunities.
+    ----------------------------------------------------------------------------
+
+================================================================================
+SECTION 5: INTEGRATION ROADMAP SUMMARY
+================================================================================
+
+STEP 1: Run SQL script in Supabase to create `pre_employment_requirements` table.
+STEP 2: Integrate `CandidateDiagnosticEngine.kt` into `JobMatchingEngine.kt`.
+STEP 3: Add AI Job Description Generator button to `mrdiy-admin/app/jobs/page.tsx`.
+STEP 4: Display Pre-Employment Checklist in Android `ApplicationsFragment.kt`.
+STEP 5: Run unit tests via `.\gradlew.bat :app:testDebugUnitTest`.
+
+================================================================================
+END OF SPECIFICATION
+================================================================================

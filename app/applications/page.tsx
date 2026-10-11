@@ -57,10 +57,6 @@ export default function ApplicationsPage() {
   // LOAD APPLICATIONS
   // ============================================================
 
-  useEffect(() => {
-    loadApplications();
-  }, []);
-
   async function loadApplications() {
     setLoading(true);
     setError("");
@@ -90,6 +86,12 @@ export default function ApplicationsPage() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadApplications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ============================================================
   // RESUME URL

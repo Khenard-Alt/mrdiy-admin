@@ -41,14 +41,6 @@ export default function MessagesPage() {
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    loadMessages(() => cancelled);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   async function loadMessages(isCancelled: () => boolean = () => false) {
     setLoading(true);
     setError("");
@@ -90,6 +82,16 @@ export default function MessagesPage() {
       }
     }
   }
+
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadMessages(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const threads = useMemo<Thread[]>(() => {
     if (!adminId) return [];
