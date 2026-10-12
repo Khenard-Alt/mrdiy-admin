@@ -36,6 +36,8 @@ type Application = {
   transfer_status: string;
   contract_start_date?: string | null;
   contract_end_date?: string | null;
+  resignation_date?: string | null;
+  last_working_day?: string | null;
 };
 
 type Assignee = {
