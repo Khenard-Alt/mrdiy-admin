@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import AdminAlertsBell from "@/components/AdminAlertsBell";
+import Sidebar from "@/components/Sidebar";
 import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 import ApplicantReview from "./ApplicantReview";
 import InterviewPanel from "./InterviewPanel";
 import RequirementsPanel from "./RequirementsPanel";
+import ProfileDocumentsPanel from "./ProfileDocumentsPanel";
+import ContractSignaturePanel from "./ContractSignaturePanel";
 import RankingPanel from "./RankingPanel";
 import HandoffPanel from "./HandoffPanel";
 import NotesPanel from "./NotesPanel";
@@ -32,6 +34,8 @@ type Application = {
   branch_id: string | null;
   tags: string[];
   transfer_status: string;
+  contract_start_date?: string | null;
+  contract_end_date?: string | null;
 };
 
 type Assignee = {
@@ -250,15 +254,6 @@ export default function ApplicationsPage() {
   }
 
   // ============================================================
-  // LOGOUT
-  // ============================================================
-
-  async function handleLogout() {
-    await fetch("/api/logout", { method: "POST" });
-    router.push("/login");
-    router.refresh();
-  }
-
   // ============================================================
   // DATE
   // ============================================================
@@ -369,92 +364,13 @@ export default function ApplicationsPage() {
   return (
     <main className="min-h-screen bg-[#f5f6f8] text-slate-900">
 
-      {/* ========================================================
-          SIDEBAR
-      ======================================================== */}
-
-      <aside className="fixed left-0 top-0 z-20 hidden h-screen w-60 bg-[#e30613] text-white lg:flex lg:flex-col">
-
-        {/* LOGO */}
-
-        <div className="flex h-20 items-center border-b border-white/15 px-6">
-          <div className="flex h-14 w-44 items-center overflow-hidden">
-            <img
-              src="/logo.png"
-              alt="MR.DIY"
-              className="h-full w-full object-contain"
-            />
-          </div>
-        </div>
-
-        {/* MENU */}
-
-        <nav className="flex-1 px-3 py-6">
-          <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.15em] text-white/60">
-            Main Menu
-          </p>
-
-          <Link
-            href="/dashboard"
-            className="flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
-          >
-            Dashboard
-          </Link>
-
-          <Link
-            href="/jobs"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
-          >
-            Jobs
-          </Link>
-
-          <Link
-            href="/applications"
-            className="mt-1 flex w-full border-l-4 border-white bg-white/15 px-6 py-3 text-left text-sm font-semibold"
-          >
-            Applications
-          </Link>
-
-          <Link
-            href="/messages"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
-          >
-            Messages
-          </Link>
-
-          <Link
-            href="/analytics"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
-          >
-            Analytics
-          </Link>
-
-          <Link
-            href="/accounts"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
-          >
-            Accounts
-          </Link>
-        </nav>
-
-        {/* LOGOUT */}
-
-        <div className="border-t border-white/15 p-4">
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="w-full px-6 py-3 text-left text-sm font-medium hover:bg-white/10"
-          >
-            Logout
-          </button>
-        </div>
-      </aside>
+      <Sidebar active="/applications" />
 
       {/* ========================================================
           MAIN
       ======================================================== */}
 
-      <div className="lg:ml-60">
+      <div className="pt-14 lg:ml-60 lg:pt-0">
 
         {/* HEADER */}
 
@@ -1035,6 +951,21 @@ export default function ApplicationsPage() {
                     </p>
                   </div>
 
+                  {/* CONTRACT */}
+
+                  {selectedApplication.contract_end_date && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Contract
+                      </p>
+
+                      <p className="mt-1 text-sm text-slate-700">
+                        {formatDate(selectedApplication.contract_start_date ?? null)} –{" "}
+                        {formatDate(selectedApplication.contract_end_date)}
+                      </p>
+                    </div>
+                  )}
+
                 </div>
               </section>
 
@@ -1259,6 +1190,7 @@ export default function ApplicationsPage() {
                 applicationId={selectedApplication.id}
                 assignedTo={selectedApplication.assigned_to}
                 assigneeName={selectedApplication.assignee?.full_name ?? selectedApplication.assignee?.username ?? null}
+                branchId={selectedApplication.branch_id}
                 branchName={selectedApplication.branch?.name ?? null}
                 currentAdminId={currentAdminId}
                 transferStatus={selectedApplication.transfer_status}
@@ -1316,6 +1248,35 @@ export default function ApplicationsPage() {
                   setReviewVersion((version) => version + 1);
                 }}
               />
+
+              {/* ==================================================
+                  PROFILE DOCUMENTS (valid ID + requirements, any stage)
+              ================================================== */}
+
+              {selectedApplication.user_id && (
+                <ProfileDocumentsPanel
+                  key={`${selectedApplication.id}-profile-docs-${reviewVersion}`}
+                  userId={selectedApplication.user_id}
+                />
+              )}
+
+              {/* ==================================================
+                  EMPLOYMENT CONTRACT (Hired + Contractual job only)
+              ================================================== */}
+
+              {normalizeStatus(selectedApplication.status) === "Hired" &&
+                selectedApplication.contract_start_date &&
+                selectedApplication.contract_end_date && (
+                  <ContractSignaturePanel
+                    key={`${selectedApplication.id}-contract-${reviewVersion}`}
+                    applicationId={selectedApplication.id}
+                    applicantName={selectedApplication.profile?.full_name || "the employee"}
+                    jobTitle={selectedApplication.job?.title || "this position"}
+                    branchName={selectedApplication.branch?.name ?? null}
+                    contractStartDate={selectedApplication.contract_start_date}
+                    contractEndDate={selectedApplication.contract_end_date}
+                  />
+                )}
 
               {/* ==================================================
                   PRE-EMPLOYMENT DOCUMENTS (after Hired)

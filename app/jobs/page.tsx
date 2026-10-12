@@ -2,8 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import AdminAlertsBell from "@/components/AdminAlertsBell";
+import Sidebar from "@/components/Sidebar";
 import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 
 type Job = {
@@ -24,6 +24,9 @@ type Job = {
   openings: number | null;
   deadline: string | null;
   branch_id: string | null;
+  contract_duration_months?: number | null;
+  filled?: number;
+  closedReason?: "filled" | "deadline" | null;
 };
 
 type Branch = {
@@ -47,6 +50,7 @@ type JobForm = {
   openings: string;
   deadline: string;
   branchId: string;
+  contractDurationMonths: string;
 };
 
 const emptyForm: JobForm = {
@@ -65,6 +69,7 @@ const emptyForm: JobForm = {
   openings: "",
   deadline: "",
   branchId: "",
+  contractDurationMonths: "",
 };
 
 const JOBS_PER_PAGE = 10;
@@ -79,6 +84,7 @@ export default function JobsPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [forbidden, setForbidden] = useState(false);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -99,12 +105,18 @@ export default function JobsPage() {
   async function loadJobs() {
     setLoading(true);
     setError("");
+    setForbidden(false);
 
     try {
       const response = await fetch("/api/jobs");
 
       if (response.status === 401) {
         router.push("/login");
+        return;
+      }
+
+      if (response.status === 403) {
+        setForbidden(true);
         return;
       }
 
@@ -160,6 +172,7 @@ export default function JobsPage() {
       openings: job.openings?.toString() ?? "",
       deadline: job.deadline ?? "",
       branchId: job.branch_id ?? "",
+      contractDurationMonths: job.contract_duration_months?.toString() ?? "",
     });
 
     setError("");
@@ -221,6 +234,10 @@ export default function JobsPage() {
       openings: form.openings ? Number(form.openings) : null,
       deadline: form.deadline || null,
       branchId: form.branchId || null,
+      contractDurationMonths:
+        form.jobType === "Contractual" && form.contractDurationMonths
+          ? Number(form.contractDurationMonths)
+          : null,
     };
 
     /*
@@ -341,12 +358,6 @@ export default function JobsPage() {
     await loadJobs();
   }
 
-  async function handleLogout() {
-    await fetch("/api/logout", { method: "POST" });
-    router.push("/login");
-    router.refresh();
-  }
-
   function formatDate(date: string | null) {
     if (!date) {
       return "—";
@@ -447,91 +458,13 @@ export default function JobsPage() {
 
   return (
     <main className="min-h-screen bg-[#f5f6f8] text-slate-900">
-      {/* =========================
-          SIDEBAR
-      ========================== */}
-
-      <aside className="fixed left-0 top-0 z-20 hidden h-screen w-60 bg-[#e30613] text-white lg:flex lg:flex-col">
-        {/* LOGO */}
-
-        <div className="flex h-20 items-center border-b border-white/15 px-6">
-          <div className="flex h-14 w-44 items-center overflow-hidden">
-            <img
-              src="/logo.png"
-              alt="MR.DIY"
-              className="h-full w-full object-contain"
-            />
-          </div>
-        </div>
-
-        {/* MENU */}
-
-        <nav className="flex-1 px-3 py-6">
-          <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.15em] text-white/60">
-            Main Menu
-          </p>
-
-          <Link
-            href="/dashboard"
-            className="flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Dashboard
-          </Link>
-
-          <Link
-            href="/jobs"
-            className="mt-1 flex w-full border-l-4 border-white bg-white/15 px-6 py-3 text-left text-sm font-semibold"
-          >
-            Jobs
-          </Link>
-
-          <Link
-            href="/applications"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Applications
-          </Link>
-
-          <Link
-            href="/messages"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Messages
-          </Link>
-
-          <Link
-            href="/analytics"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Analytics
-          </Link>
-
-          <Link
-            href="/accounts"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Accounts
-          </Link>
-        </nav>
-
-        {/* LOGOUT */}
-
-        <div className="border-t border-white/15 p-4">
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex w-full px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Logout
-          </button>
-        </div>
-      </aside>
+      <Sidebar active="/jobs" />
 
       {/* =========================
           MAIN CONTENT
       ========================== */}
 
-      <div className="lg:ml-60">
+      <div className="pt-14 lg:ml-60 lg:pt-0">
         {/* HEADER */}
 
         <header className="sticky top-0 z-10 flex min-h-20 items-center justify-between border-b border-slate-200 bg-white px-6 lg:px-8">
@@ -550,6 +483,16 @@ export default function JobsPage() {
         {/* PAGE CONTENT */}
 
         <div className="p-5 sm:p-6 lg:p-8">
+          {forbidden ? (
+            <div className="border border-slate-200 bg-white px-6 py-16 text-center">
+              <h3 className="text-sm font-semibold text-slate-800">HR access required</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Job postings are managed by HR Officer and Super Admin accounts. Branch managers focus on applications
+                and interviews for their own branch instead.
+              </p>
+            </div>
+          ) : (
+            <>
           {/* INTRO */}
 
           <section className="mb-7 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
@@ -673,6 +616,10 @@ export default function JobsPage() {
                       </th>
 
                       <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Vacancy
+                      </th>
+
+                      <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Status
                       </th>
 
@@ -705,6 +652,13 @@ export default function JobsPage() {
                               {job.description ||
                                 "No description provided."}
                             </p>
+
+                            {job.contract_duration_months && (
+                              <p className="mt-1 text-[11px] font-medium text-amber-700">
+                                Contract: {job.contract_duration_months} mo
+                                {job.contract_duration_months !== 1 ? "s" : ""}
+                              </p>
+                            )}
                           </div>
                         </td>
 
@@ -728,6 +682,35 @@ export default function JobsPage() {
                           )}
                         </td>
 
+                        {/* VACANCY */}
+
+                        <td className="px-5 py-4">
+                          {job.openings ? (
+                            <div className="w-24">
+                              <p className="text-xs font-medium text-slate-600">
+                                {job.filled ?? 0} / {job.openings}
+                              </p>
+                              <div className="mt-1 h-1.5 w-full bg-slate-100">
+                                <div
+                                  className={`h-1.5 ${
+                                    (job.filled ?? 0) >= job.openings
+                                      ? "bg-green-500"
+                                      : "bg-[#e30613]"
+                                  }`}
+                                  style={{
+                                    width: `${Math.min(
+                                      100,
+                                      ((job.filled ?? 0) / job.openings) * 100
+                                    )}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-slate-400">—</span>
+                          )}
+                        </td>
+
                         {/* STATUS */}
 
                         <td className="px-5 py-4">
@@ -738,6 +721,14 @@ export default function JobsPage() {
                           >
                             {formatStatus(job.status)}
                           </span>
+
+                          {job.closedReason && (
+                            <p className="mt-1 text-[11px] text-slate-400">
+                              {job.closedReason === "filled"
+                                ? "Filled"
+                                : "Deadline passed"}
+                            </p>
+                          )}
                         </td>
 
                         {/* DATE */}
@@ -830,6 +821,8 @@ export default function JobsPage() {
               MR.DIY Careers Administration
             </p>
           </footer>
+            </>
+          )}
         </div>
       </div>
 
@@ -919,8 +912,20 @@ export default function JobsPage() {
                   }
                   placeholder="e.g. Antipolo City"
                   required
+                  list="branch-locations"
+                  autoComplete="off"
                   className="w-full border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
                 />
+
+                <datalist id="branch-locations">
+                  {[...new Set(branches.map((branch) => branch.name))].map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+
+                <p className="mt-1 text-xs text-slate-400">
+                  Start typing to search existing branches, or enter a new location.
+                </p>
               </div>
 
               {/* SALARY + SALARY TYPE */}
@@ -1092,6 +1097,28 @@ export default function JobsPage() {
                   </select>
                 </div>
               </div>
+
+              {/* CONTRACT DURATION (contractual jobs only) */}
+
+              {form.jobType === "Contractual" && (
+                <div className="mt-5 sm:w-1/3">
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    Contract Duration (months)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={form.contractDurationMonths}
+                    onChange={(event) => updateForm("contractDurationMonths", event.target.value)}
+                    placeholder="e.g. 5"
+                    className="w-full border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
+                  />
+                  <p className="mt-1 text-xs text-slate-400">
+                    When an applicant is Hired, their contract end date is set to this many months
+                    from the hire date.
+                  </p>
+                </div>
+              )}
 
               {/* DESCRIPTION */}
 

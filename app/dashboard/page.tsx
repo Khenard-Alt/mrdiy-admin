@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AdminAlertsBell from "@/components/AdminAlertsBell";
+import Sidebar from "@/components/Sidebar";
 import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 
 type Application = {
@@ -17,15 +18,29 @@ type Application = {
   applicant_email: string | null;
 };
 
+type UpcomingInterview = {
+  id: string;
+  applicationId: string;
+  scheduledAt: string;
+  venue: string | null;
+  mode: "in_person" | "online";
+  meetingLink: string | null;
+  applicantResponse: "Pending" | "Confirmed" | "Declined";
+  jobTitle: string | null;
+  applicantName: string | null;
+};
+
 export default function DashboardPage() {
   const router = useRouter();
 
-  const [totalJobs, setTotalJobs] = useState(0);
+  const [role, setRole] = useState<"super_admin" | "hr_officer" | "branch_manager" | null>(null);
+  const [totalJobs, setTotalJobs] = useState<number | null>(0);
   const [totalApplications, setTotalApplications] = useState(0);
   const [pendingApplications, setPendingApplications] = useState(0);
   const [approvedApplications, setApprovedApplications] = useState(0);
 
   const [recentApplications, setRecentApplications] = useState<Application[]>([]);
+  const [upcomingInterviews, setUpcomingInterviews] = useState<UpcomingInterview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -48,11 +63,13 @@ export default function DashboardPage() {
 
       const data = await response.json();
 
+      setRole(data.role ?? null);
       setTotalJobs(data.totalJobs);
       setTotalApplications(data.totalApplications);
       setPendingApplications(data.pendingApplications);
       setApprovedApplications(data.approvedApplications);
       setRecentApplications(data.recentApplications);
+      setUpcomingInterviews(data.upcomingInterviews ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -66,13 +83,24 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useRealtimeRefresh(["applications", "jobs"], loadDashboard);
+  useRealtimeRefresh(["applications", "jobs", "interviews"], loadDashboard);
 
-  async function handleLogout() {
-    await fetch("/api/logout", { method: "POST" });
-    router.push("/login");
-    router.refresh();
+  function formatInterviewWhen(iso: string) {
+    return new Date(iso).toLocaleString("en-PH", {
+      timeZone: "Asia/Manila",
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
   }
+
+  const RESPONSE_STYLE: Record<UpcomingInterview["applicantResponse"], string> = {
+    Pending: "border-yellow-200 bg-yellow-50 text-yellow-700",
+    Confirmed: "border-green-200 bg-green-50 text-green-700",
+    Declined: "border-red-200 bg-red-50 text-red-700",
+  };
 
   function getStatusStyle(status: string | null) {
     const value = (status ?? "Pending").toLowerCase();
@@ -93,84 +121,16 @@ export default function DashboardPage() {
     return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
   }
 
+  // Hidden by default until the role is confirmed, so the Jobs card/action
+  // never flashes in for a branch manager and then disappears.
+  const canManageJobs = role === "super_admin" || role === "hr_officer";
+
   return (
     <main className="min-h-screen bg-[#f5f6f8] text-slate-900">
-      {/* SIDEBAR */}
-      <aside className="fixed left-0 top-0 z-20 hidden h-screen w-60 bg-[#e30613] text-white lg:flex lg:flex-col">
-        {/* LOGO */}
-        <div className="flex h-20 items-center border-b border-white/15 px-6">
-          <div className="flex h-14 w-44 items-center overflow-hidden">
-            <img
-              src="/logo.png"
-              alt="MR.DIY"
-              className="h-full w-full object-contain"
-            />
-          </div>
-        </div>
-
-        {/* NAVIGATION */}
-        <nav className="flex-1 px-3 py-6">
-          <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.15em] text-white/60">
-            Main Menu
-          </p>
-
-          <Link
-            href="/dashboard"
-            className="flex w-full border-l-4 border-white bg-white/15 px-6 py-3 text-left text-sm font-semibold"
-          >
-            Dashboard
-          </Link>
-
-          <Link
-            href="/jobs"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Jobs
-          </Link>
-
-          <Link
-            href="/applications"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Applications
-          </Link>
-
-          <Link
-            href="/messages"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Messages
-          </Link>
-
-          <Link
-            href="/analytics"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Analytics
-          </Link>
-
-          <Link
-            href="/accounts"
-            className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Accounts
-          </Link>
-        </nav>
-
-        {/* LOGOUT */}
-        <div className="border-t border-white/15 p-4">
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex w-full px-6 py-3 text-left text-sm font-medium transition hover:bg-white/10"
-          >
-            Logout
-          </button>
-        </div>
-      </aside>
+      <Sidebar active="/dashboard" />
 
       {/* MAIN CONTENT */}
-      <div className="lg:ml-60">
+      <div className="pt-14 lg:ml-60 lg:pt-0">
         {/* HEADER */}
         <header className="sticky top-0 z-10 flex min-h-20 items-center justify-between border-b border-slate-200 bg-white px-6 lg:px-8">
           <div>
@@ -200,36 +160,42 @@ export default function DashboardPage() {
               <p className="mt-1 text-sm text-slate-500">Current recruitment activity</p>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {/* TOTAL JOBS */}
-              <div className="border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      Total Jobs
-                    </p>
-                    <p className="mt-3 text-3xl font-bold text-slate-900">
-                      {loading ? "—" : totalJobs}
-                    </p>
+            <div
+              className={`grid gap-4 sm:grid-cols-2 ${
+                canManageJobs ? "xl:grid-cols-4" : "xl:grid-cols-3"
+              }`}
+            >
+              {/* TOTAL JOBS (hidden for branch managers — job postings are company-wide, not theirs) */}
+              {canManageJobs && (
+                <div className="border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Total Jobs
+                      </p>
+                      <p className="mt-3 text-3xl font-bold text-slate-900">
+                        {loading ? "—" : totalJobs}
+                      </p>
+                    </div>
+                    <span className="border border-red-100 bg-red-50 px-2.5 py-1 text-[10px] font-bold text-[#e30613]">
+                      JOBS
+                    </span>
                   </div>
-                  <span className="border border-red-100 bg-red-50 px-2.5 py-1 text-[10px] font-bold text-[#e30613]">
-                    JOBS
-                  </span>
+                  <Link
+                    href="/jobs"
+                    className="mt-5 inline-block text-xs font-semibold text-[#e30613] hover:underline"
+                  >
+                    Manage jobs →
+                  </Link>
                 </div>
-                <Link
-                  href="/jobs"
-                  className="mt-5 inline-block text-xs font-semibold text-[#e30613] hover:underline"
-                >
-                  Manage jobs →
-                </Link>
-              </div>
+              )}
 
               {/* APPLICATIONS */}
               <div className="border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      Applications
+                      {role === "branch_manager" ? "Applications (your branch)" : "Applications"}
                     </p>
                     <p className="mt-3 text-3xl font-bold text-slate-900">
                       {loading ? "—" : totalApplications}
@@ -305,16 +271,18 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Link
-                href="/jobs"
-                className="block border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-[#e30613]"
-              >
-                <p className="text-sm font-bold text-slate-900">Manage Jobs</p>
-                <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Create new positions, update job details, and manage current job postings.
-                </p>
-                <p className="mt-4 text-xs font-semibold text-[#e30613]">Open Jobs →</p>
-              </Link>
+              {canManageJobs && (
+                <Link
+                  href="/jobs"
+                  className="block border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-[#e30613]"
+                >
+                  <p className="text-sm font-bold text-slate-900">Manage Jobs</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">
+                    Create new positions, update job details, and manage current job postings.
+                  </p>
+                  <p className="mt-4 text-xs font-semibold text-[#e30613]">Open Jobs →</p>
+                </Link>
+              )}
 
               <Link
                 href="/applications"
@@ -327,6 +295,53 @@ export default function DashboardPage() {
                 <p className="mt-4 text-xs font-semibold text-[#e30613]">Open Applications →</p>
               </Link>
             </div>
+          </section>
+
+          {/* UPCOMING INTERVIEWS */}
+          <section className="mt-8 border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Upcoming Interviews</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  The next {upcomingInterviews.length} scheduled, soonest first.
+                </p>
+              </div>
+            </div>
+
+            {upcomingInterviews.length === 0 ? (
+              <div className="px-5 py-10 text-center text-sm text-slate-500">
+                No interviews scheduled yet.
+              </div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {upcomingInterviews.map((interview) => (
+                  <li key={interview.id}>
+                    <Link
+                      href="/applications"
+                      className="flex flex-col gap-2 px-5 py-4 transition hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">
+                          {interview.applicantName || "Applicant"} · {interview.jobTitle || "—"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {formatInterviewWhen(interview.scheduledAt)} ·{" "}
+                          {interview.mode === "online" ? "Online" : interview.venue || "—"}
+                        </p>
+                      </div>
+
+                      <span
+                        className={`inline-flex w-fit border px-2.5 py-1 text-[11px] font-semibold ${RESPONSE_STYLE[interview.applicantResponse]}`}
+                      >
+                        {interview.applicantResponse === "Pending"
+                          ? "Awaiting response"
+                          : interview.applicantResponse}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           {/* RECENT APPLICATIONS */}

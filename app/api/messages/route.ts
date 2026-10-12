@@ -60,6 +60,19 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient();
 
+  if (session.role === "branch_manager") {
+    const { data: inBranch } = await supabase
+      .from("applications")
+      .select("id")
+      .eq("user_id", receiverId)
+      .eq("branch_id", session.branchId)
+      .limit(1)
+      .maybeSingle();
+    if (!inBranch) {
+      return NextResponse.json({ error: "This applicant is not in your branch." }, { status: 403 });
+    }
+  }
+
   const { data, error } = await supabase
     .from("messages")
     .insert({

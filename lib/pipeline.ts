@@ -12,6 +12,8 @@ export const STATUS_VALUES = [
   "Shortlisted",
   "Interview Scheduled",
   "Hired",
+  "Contract Ended",
+  "Resigned",
   "Rejected",
   "On Hold",
   "Withdrawn",
@@ -34,6 +36,8 @@ const LABELS: Record<Status, string> = {
   Shortlisted: "Shortlisted",
   "Interview Scheduled": "Interview Scheduled",
   Hired: "Hired",
+  "Contract Ended": "Contract Ended",
+  Resigned: "Resigned",
   Rejected: "Rejected",
   "On Hold": "On Hold",
   Withdrawn: "Withdrawn",
@@ -72,6 +76,10 @@ export function statusClasses(raw: string | null | undefined): string {
   switch (normalizeStatus(raw)) {
     case "Hired":
       return "border-green-200 bg-green-50 text-green-700";
+    case "Contract Ended":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    case "Resigned":
+      return "border-sky-200 bg-sky-50 text-sky-700";
     case "Rejected":
       return "border-red-200 bg-red-50 text-red-700";
     case "Reviewed":
@@ -91,10 +99,12 @@ export function statusClasses(raw: string | null | undefined): string {
 
 /**
  * Statuses HR can set with a button. "Interview Scheduled" is set by scheduling an
- * interview, and "Withdrawn" is set by the applicant withdrawing, not by HR.
+ * interview, "Withdrawn" is set by the applicant withdrawing (not by HR), and
+ * "Resigned" is set through the dedicated Resignation panel (it needs a resignation
+ * date and computes a last working day, not just a one-click status change).
  */
 export const SETTABLE_STATUSES: Status[] = STATUS_VALUES.filter(
-  (s) => s !== "Interview Scheduled" && s !== "Withdrawn"
+  (s) => s !== "Interview Scheduled" && s !== "Withdrawn" && s !== "Resigned"
 );
 
 // ---------------------------------------------------------------------------
@@ -149,6 +159,22 @@ export function statusContent(raw: string, jobTitle: string | null, firstName?: 
           "in the MR.DIY Careers app, under your application. You will also see the estimated number of days before you start.\n\n" +
           "Welcome to the MR.DIY team!",
       };
+    case "Contract Ended":
+      return {
+        title: "Your contract has ended",
+        alert: `Your contract for ${job} has ended. Thank you for your service!`,
+        note:
+          `${hello}\n\nYour contract for ${job} has ended. We thank you for your hard work and dedication during your time with MR.DIY.\n\n` +
+          "If you are interested in future openings, we encourage you to apply again.",
+      };
+    case "Resigned":
+      return {
+        title: "Resignation recorded",
+        alert: `Your resignation from ${job} has been recorded. See the app for your last working day and exit requirements.`,
+        note:
+          `${hello}\n\nYour resignation from ${job} has been recorded. Please see the MR.DIY Careers app for your ` +
+          "last working day and the exit checklist. We thank you for your service and wish you well.",
+      };
     case "Rejected":
       return {
         title: "Application update",
@@ -193,4 +219,26 @@ export const PRE_EMPLOYMENT_REQUIREMENTS = [
   "Pre-Employment Medical Exam / Health Permit",
   "BIR Form 1902 / TIN",
   "Signed Employment Contract",
+] as const;
+
+// ---------------------------------------------------------------------------
+// Profile-level documents (optional, uploadable any time from the applicant's
+// profile — not tied to one application, and not required to apply)
+// ---------------------------------------------------------------------------
+
+export const PROFILE_DOCUMENTS = [
+  "Valid ID (with signature)",
+  ...PRE_EMPLOYMENT_REQUIREMENTS,
+] as const;
+
+// ---------------------------------------------------------------------------
+// Exit checklist (created when an applicant resigns)
+// ---------------------------------------------------------------------------
+
+export const EXIT_CHECKLIST_ITEMS = [
+  "Company ID",
+  "Uniform",
+  "Issued Equipment / Devices",
+  "Locker Key",
+  "Signed Clearance Form",
 ] as const;

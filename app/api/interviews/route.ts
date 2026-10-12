@@ -44,7 +44,8 @@ function detailsText(interview: InterviewRow) {
 
 /** The interviews of one application, newest first. */
 export async function GET(request: NextRequest) {
-  if (!requireAdminSession(request)) {
+  const session = requireAdminSession(request);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -53,7 +54,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "applicationId is required." }, { status: 400 });
   }
 
-  const { data, error } = await createAdminClient()
+  const supabase = createAdminClient();
+
+  if (session.role === "branch_manager") {
+    const { data: application } = await supabase
+      .from("applications")
+      .select("branch_id")
+      .eq("id", applicationId)
+      .maybeSingle();
+    if (application?.branch_id !== session.branchId) {
+      return NextResponse.json({ error: "This application is not in your branch." }, { status: 403 });
+    }
+  }
+
+  const { data, error } = await supabase
     .from("interviews")
     .select("*")
     .eq("application_id", applicationId)
@@ -109,12 +123,16 @@ export async function POST(request: NextRequest) {
 
   const { data: application } = await supabase
     .from("applications")
-    .select("id, user_id, job_id, status")
+    .select("id, user_id, job_id, status, branch_id")
     .eq("id", applicationId)
     .maybeSingle();
 
   if (!application?.user_id) {
     return NextResponse.json({ error: "Application not found." }, { status: 404 });
+  }
+
+  if (session.role === "branch_manager" && application.branch_id !== session.branchId) {
+    return NextResponse.json({ error: "This application is not in your branch." }, { status: 403 });
   }
 
   const current = normalizeStatus(application.status);
@@ -242,6 +260,17 @@ export async function PATCH(request: NextRequest) {
   }
   if (!["Scheduled", "Rescheduled"].includes(interview.status)) {
     return NextResponse.json({ error: `This interview is already ${interview.status.toLowerCase()}.` }, { status: 400 });
+  }
+
+  if (session.role === "branch_manager") {
+    const { data: application } = await supabase
+      .from("applications")
+      .select("branch_id")
+      .eq("id", interview.application_id)
+      .maybeSingle();
+    if (application?.branch_id !== session.branchId) {
+      return NextResponse.json({ error: "This application is not in your branch." }, { status: 403 });
+    }
   }
 
   const { error } = await supabase

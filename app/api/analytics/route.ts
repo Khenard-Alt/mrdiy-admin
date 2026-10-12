@@ -160,8 +160,11 @@ export async function GET(request: NextRequest) {
   const topJobs = byJob.slice(0, 5);
 
   return NextResponse.json({
+    role: session.role,
     funnel,
-    byBranch,
+    // A branch manager's own branch would be the only row here — not a useful
+    // "comparison", so it's left out entirely rather than shown as one row.
+    byBranch: session.role === "branch_manager" ? [] : byBranch,
     byJob,
     topJobs,
     averageMatchScore,

@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdminSession } from "@/lib/requireAdminSession";
+import { hasRole } from "@/lib/adminSession";
 
 /** Copies a job posting to another branch as a Draft, so HR doesn't retype it. */
 export async function POST(request: NextRequest) {
-  if (!requireAdminSession(request)) {
+  const session = requireAdminSession(request);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (hasRole(session, "branch_manager")) {
+    return NextResponse.json({ error: "Job postings are managed by HR, not by branch managers." }, { status: 403 });
   }
 
   const body = await request.json();

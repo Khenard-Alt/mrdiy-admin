@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("admin_users")
-    .select("id, username, full_name, role, branch_id")
+    .select("id, username, full_name, role, branch_id, branches!branch_id(name)")
     .eq("is_active", true)
     .order("full_name", { ascending: true });
 
@@ -23,5 +23,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ admins: data ?? [] });
+  const admins = (data ?? []).map((admin) => {
+    const branch = admin.branches as unknown as { name: string | null } | { name: string | null }[] | null;
+    const branchName = Array.isArray(branch) ? (branch[0]?.name ?? null) : (branch?.name ?? null);
+    return {
+      id: admin.id,
+      username: admin.username,
+      full_name: admin.full_name,
+      role: admin.role,
+      branch_id: admin.branch_id,
+      branch_name: branchName,
+    };
+  });
+
+  return NextResponse.json({ admins });
 }

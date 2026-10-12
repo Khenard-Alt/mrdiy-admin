@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdminSession } from "@/lib/requireAdminSession";
+import { hasRole } from "@/lib/adminSession";
 import { notifyNewJob } from "@/lib/notifications";
 
 function isPublished(status: string | null | undefined) {
@@ -24,15 +25,19 @@ async function notifySafely(
 }
 
 export async function GET(request: NextRequest) {
-  if (!requireAdminSession(request)) {
+  const session = requireAdminSession(request);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (hasRole(session, "branch_manager")) {
+    return NextResponse.json({ error: "Job postings are managed by HR, not by branch managers." }, { status: 403 });
   }
 
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("jobs")
     .select(
-      "id, title, description, responsibilities, requirements, benefits, location, salary, status, created_at, salary_type, openings, deadline, branch_id"
+      "id, title, description, responsibilities, requirements, benefits, location, salary, status, created_at, salary_type, openings, deadline, branch_id, job_type, category, level, contract_duration_months"
     )
     .order("created_at", { ascending: false });
 
@@ -40,7 +45,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const jobs = await autoCloseExpiredOrFilled(supabase, data ?? []);
+  const jobs = await attachVacancyInfo(supabase, await autoCloseExpiredOrFilled(supabase, data ?? []));
 
   return NextResponse.json({ jobs });
 }
@@ -52,6 +57,29 @@ type JobRow = {
   deadline: string | null;
   [key: string]: unknown;
 };
+
+/** How many jobs are Hired per job id, for every job that has an openings target. */
+async function hiredCountsByJob(
+  supabase: ReturnType<typeof createAdminClient>,
+  jobs: JobRow[]
+): Promise<Map<string, number>> {
+  const withOpenings = jobs.filter((job) => job.openings !== null && job.openings !== undefined);
+  if (withOpenings.length === 0) return new Map();
+
+  const { data: hired } = await supabase
+    .from("applications")
+    .select("job_id")
+    .eq("status", "Hired")
+    .in(
+      "job_id",
+      withOpenings.map((j) => j.id)
+    );
+
+  return (hired ?? []).reduce((map, row) => {
+    map.set(row.job_id, (map.get(row.job_id) ?? 0) + 1);
+    return map;
+  }, new Map<string, number>());
+}
 
 /**
  * A published job automatically becomes Closed once its deadline has passed, or once
@@ -73,21 +101,7 @@ async function autoCloseExpiredOrFilled(
     (job) => job.status === "published" && job.openings !== null && job.openings !== undefined
   );
 
-  let hiredCounts = new Map<string, number>();
-  if (limitedOpenings.length > 0) {
-    const { data: hired } = await supabase
-      .from("applications")
-      .select("job_id")
-      .eq("status", "Hired")
-      .in(
-        "job_id",
-        limitedOpenings.map((j) => j.id)
-      );
-    hiredCounts = (hired ?? []).reduce((map, row) => {
-      map.set(row.job_id, (map.get(row.job_id) ?? 0) + 1);
-      return map;
-    }, new Map<string, number>());
-  }
+  const hiredCounts = await hiredCountsByJob(supabase, limitedOpenings);
 
   const filled = limitedOpenings.filter((job) => (hiredCounts.get(job.id) ?? 0) >= (job.openings ?? 0));
 
@@ -99,9 +113,40 @@ async function autoCloseExpiredOrFilled(
   return jobs.map((job) => (toClose.includes(job.id) ? { ...job, status: "closed" } : job));
 }
 
+/**
+ * Adds `filled` (count of Hired applicants) and `closedReason` ("filled" | "deadline" | null)
+ * to each job so the admin table can show vacancy progress and why a job closed.
+ */
+async function attachVacancyInfo(
+  supabase: ReturnType<typeof createAdminClient>,
+  jobs: JobRow[]
+): Promise<JobRow[]> {
+  const hiredCounts = await hiredCountsByJob(supabase, jobs);
+  const today = new Date().toISOString().slice(0, 10);
+
+  return jobs.map((job) => {
+    const filled = hiredCounts.get(job.id) ?? 0;
+
+    let closedReason: "filled" | "deadline" | null = null;
+    if (job.status === "closed") {
+      if (job.openings !== null && job.openings !== undefined && filled >= job.openings) {
+        closedReason = "filled";
+      } else if (job.deadline && job.deadline < today) {
+        closedReason = "deadline";
+      }
+    }
+
+    return { ...job, filled, closedReason };
+  });
+}
+
 export async function POST(request: NextRequest) {
-  if (!requireAdminSession(request)) {
+  const session = requireAdminSession(request);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (hasRole(session, "branch_manager")) {
+    return NextResponse.json({ error: "Job postings are managed by HR, not by branch managers." }, { status: 403 });
   }
 
   const body = await request.json();
@@ -125,6 +170,7 @@ export async function POST(request: NextRequest) {
       openings: body.openings || null,
       deadline: body.deadline || null,
       branch_id: body.branchId || null,
+      contract_duration_months: body.contractDurationMonths || null,
     })
     .select("*")
     .single();
@@ -141,8 +187,12 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  if (!requireAdminSession(request)) {
+  const session = requireAdminSession(request);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (hasRole(session, "branch_manager")) {
+    return NextResponse.json({ error: "Job postings are managed by HR, not by branch managers." }, { status: 403 });
   }
 
   const body = await request.json();
@@ -177,6 +227,7 @@ export async function PATCH(request: NextRequest) {
       openings: body.openings || null,
       deadline: body.deadline || null,
       branch_id: body.branchId || null,
+      contract_duration_months: body.contractDurationMonths || null,
     })
     .eq("id", body.id)
     .select("*")
@@ -196,8 +247,12 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  if (!requireAdminSession(request)) {
+  const session = requireAdminSession(request);
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (hasRole(session, "branch_manager")) {
+    return NextResponse.json({ error: "Job postings are managed by HR, not by branch managers." }, { status: 403 });
   }
 
   const { searchParams } = new URL(request.url);

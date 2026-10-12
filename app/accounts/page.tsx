@@ -2,8 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import AdminAlertsBell from "@/components/AdminAlertsBell";
+import Sidebar from "@/components/Sidebar";
 
 type Role = "super_admin" | "hr_officer" | "branch_manager";
 
@@ -214,12 +214,6 @@ export default function AccountsPage() {
     await loadAccounts();
   }
 
-  async function handleLogout() {
-    await fetch("/api/logout", { method: "POST" });
-    router.push("/login");
-    router.refresh();
-  }
-
   function branchName(branchId: string | null) {
     if (!branchId) return "—";
     return branches.find((b) => b.id === branchId)?.name ?? "—";
@@ -227,45 +221,9 @@ export default function AccountsPage() {
 
   return (
     <main className="min-h-screen bg-[#f5f6f8] text-slate-900">
-      <aside className="fixed left-0 top-0 z-20 hidden h-screen w-60 bg-[#e30613] text-white lg:flex lg:flex-col">
-        <div className="flex h-20 items-center border-b border-white/15 px-6">
-          <div className="flex h-14 w-44 items-center overflow-hidden">
-            <img src="/logo.png" alt="MR.DIY" className="h-full w-full object-contain" />
-          </div>
-        </div>
+      <Sidebar active="/accounts" />
 
-        <nav className="flex-1 px-3 py-6">
-          <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.15em] text-white/60">
-            Main Menu
-          </p>
-          <Link href="/dashboard" className="flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10">
-            Dashboard
-          </Link>
-          <Link href="/jobs" className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10">
-            Jobs
-          </Link>
-          <Link href="/applications" className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10">
-            Applications
-          </Link>
-          <Link href="/messages" className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10">
-            Messages
-          </Link>
-          <Link href="/analytics" className="mt-1 flex w-full border-l-4 border-transparent px-6 py-3 text-left text-sm font-medium hover:bg-white/10">
-            Analytics
-          </Link>
-          <Link href="/accounts" className="mt-1 flex w-full border-l-4 border-white bg-white/15 px-6 py-3 text-left text-sm font-semibold">
-            Accounts
-          </Link>
-        </nav>
-
-        <div className="border-t border-white/15 p-4">
-          <button type="button" onClick={handleLogout} className="w-full px-6 py-3 text-left text-sm font-medium hover:bg-white/10">
-            Logout
-          </button>
-        </div>
-      </aside>
-
-      <div className="lg:ml-60">
+      <div className="pt-14 lg:ml-60 lg:pt-0">
         <header className="sticky top-0 z-10 flex min-h-20 items-center justify-between border-b border-slate-200 bg-white px-6 lg:px-8">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">MR.DIY Careers</p>

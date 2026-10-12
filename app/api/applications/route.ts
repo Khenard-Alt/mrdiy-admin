@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
   let query = supabase
     .from("applications")
     .select(
-      "id, user_id, job_id, resume_url, status, match_score, created_at, updated_at, assigned_to, branch_id, tags, transfer_status, transfer_offer_branch_id"
+      "id, user_id, job_id, resume_url, status, match_score, created_at, updated_at, assigned_to, branch_id, tags, transfer_status, transfer_offer_branch_id, contract_start_date, contract_end_date"
     )
     .order("created_at", { ascending: false });
 
@@ -131,7 +131,78 @@ export async function GET(request: NextRequest) {
     };
   });
 
+  // Best-effort: let HR know when a Hired applicant's contract is about to end.
+  // Never fails the page load if it errors.
+  try {
+    await remindContractsEnding(supabase, applicationRows);
+  } catch {
+    // ignore
+  }
+
   return NextResponse.json({ applications: combined });
+}
+
+/**
+ * Admin alert, once per application, when a Hired applicant's contract ends within
+ * the next 14 days. Checked lazily on each applications list load (same pattern as
+ * the jobs auto-close check) instead of a cron job.
+ */
+async function remindContractsEnding(
+  supabase: ReturnType<typeof createAdminClient>,
+  applications: { id: string; status: string | null; branch_id: string | null; contract_end_date?: string | null }[]
+) {
+  const today = new Date().toISOString().slice(0, 10);
+  const soon = new Date();
+  soon.setDate(soon.getDate() + 14);
+  const soonStr = soon.toISOString().slice(0, 10);
+
+  const ending = applications.filter(
+    (application) =>
+      normalizeStatus(application.status) === "Hired" &&
+      application.contract_end_date &&
+      application.contract_end_date >= today &&
+      application.contract_end_date <= soonStr
+  );
+  if (ending.length === 0) return;
+
+  const { data: existingAlerts } = await supabase
+    .from("admin_alerts")
+    .select("application_id")
+    .eq("type", "CONTRACT_ENDING")
+    .in(
+      "application_id",
+      ending.map((application) => application.id)
+    );
+  const alreadyAlerted = new Set((existingAlerts ?? []).map((row) => row.application_id));
+
+  const toAlert = ending.filter((application) => !alreadyAlerted.has(application.id));
+  if (toAlert.length === 0) return;
+
+  const { data: admins } = await supabase
+    .from("admin_users")
+    .select("id, role, branch_id")
+    .eq("is_active", true);
+
+  const rows = toAlert.flatMap((application) =>
+    (admins ?? [])
+      .filter(
+        (admin) =>
+          admin.role === "super_admin" ||
+          admin.role === "hr_officer" ||
+          (admin.role === "branch_manager" && admin.branch_id === application.branch_id)
+      )
+      .map((admin) => ({
+        admin_id: admin.id,
+        type: "CONTRACT_ENDING",
+        title: "Contract ending soon",
+        message: `A hired applicant's contract ends on ${application.contract_end_date}.`,
+        application_id: application.id,
+      }))
+  );
+
+  if (rows.length > 0) {
+    await supabase.from("admin_alerts").insert(rows);
+  }
 }
 
 export async function PATCH(request: NextRequest) {
@@ -190,9 +261,27 @@ export async function PATCH(request: NextRequest) {
 
   const statusChanged = normalizeStatus(existing.status) !== next;
 
+  // Hiring a Contractual applicant whose job has a duration starts the contract clock.
+  const contractDates: { contract_start_date?: string; contract_end_date?: string } = {};
+  if (statusChanged && next === "Hired") {
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("contract_duration_months")
+      .eq("id", existing.job_id)
+      .maybeSingle();
+
+    if (job?.contract_duration_months) {
+      const start = new Date();
+      const end = new Date(start);
+      end.setMonth(end.getMonth() + job.contract_duration_months);
+      contractDates.contract_start_date = start.toISOString().slice(0, 10);
+      contractDates.contract_end_date = end.toISOString().slice(0, 10);
+    }
+  }
+
   const { error: updateError } = await supabase
     .from("applications")
-    .update({ status: next, updated_at: new Date().toISOString() })
+    .update({ status: next, updated_at: new Date().toISOString(), ...contractDates })
     .eq("id", id);
 
   if (updateError) {

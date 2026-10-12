@@ -8,6 +8,7 @@ type Admin = {
   full_name: string | null;
   role: "super_admin" | "hr_officer" | "branch_manager";
   branch_id: string | null;
+  branch_name: string | null;
 };
 
 type Event = {
@@ -22,6 +23,7 @@ type Props = {
   applicationId: string;
   assignedTo: string | null;
   assigneeName: string | null;
+  branchId: string | null;
   branchName: string | null;
   currentAdminId: string;
   transferStatus: string;
@@ -54,6 +56,7 @@ export default function HandoffPanel({
   applicationId,
   assignedTo,
   assigneeName,
+  branchId,
   branchName,
   currentAdminId,
   transferStatus,
@@ -64,6 +67,7 @@ export default function HandoffPanel({
   const [admins, setAdmins] = useState<Admin[]>([]);
   const [events, setEvents] = useState<Event[] | null>(null);
   const [targetAdminId, setTargetAdminId] = useState("");
+  const [escalateTargetId, setEscalateTargetId] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -95,13 +99,15 @@ export default function HandoffPanel({
     setSaving(true);
 
     try {
+      const target = action === "escalate" ? escalateTargetId : action === "assign" ? targetAdminId : undefined;
+
       const response = await fetch("/api/applications/assign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: applicationId,
           action,
-          targetAdminId: action === "assign" || action === "escalate" ? targetAdminId : undefined,
+          targetAdminId: target,
           note: note || undefined,
         }),
       });
@@ -125,6 +131,7 @@ export default function HandoffPanel({
       }
       setNote("");
       setTargetAdminId("");
+      setEscalateTargetId("");
       await loadEvents();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update the assignment.");
@@ -136,6 +143,10 @@ export default function HandoffPanel({
   const isMine = assignedTo === currentAdminId;
   const otherAdmins = admins.filter((a) => a.id !== currentAdminId);
   const superAdmins = admins.filter((a) => a.role === "super_admin" && a.id !== currentAdminId);
+
+  // Admins already in this application's branch are the most likely hand-off target, so they float to the top.
+  const sameBranchAdmins = branchId ? otherAdmins.filter((a) => a.branch_id === branchId) : [];
+  const otherBranchAdmins = branchId ? otherAdmins.filter((a) => a.branch_id !== branchId) : otherAdmins;
 
   return (
     <section className="mt-6 border border-slate-200 p-6">
@@ -198,7 +209,7 @@ export default function HandoffPanel({
         <div className="flex items-end gap-2">
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Assign / escalate to
+              Assign to
             </label>
             <select
               value={targetAdminId}
@@ -206,11 +217,23 @@ export default function HandoffPanel({
               className="border border-slate-300 bg-white px-3 py-2.5 text-xs outline-none focus:border-[#e30613]"
             >
               <option value="">Select admin…</option>
-              {otherAdmins.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.full_name || a.username} ({a.role.replace("_", " ")})
-                </option>
-              ))}
+              {sameBranchAdmins.length > 0 && (
+                <optgroup label="In this application's branch">
+                  {sameBranchAdmins.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.full_name || a.username} ({a.role.replace("_", " ")})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label={sameBranchAdmins.length > 0 ? "Other admins" : "All admins"}>
+                {otherBranchAdmins.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.full_name || a.username} ({a.role.replace("_", " ")}
+                    {a.branch_name ? ` · ${a.branch_name}` : ""})
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </div>
           <button
@@ -221,17 +244,37 @@ export default function HandoffPanel({
           >
             Assign
           </button>
-          {superAdmins.length > 0 && (
+        </div>
+
+        {superAdmins.length > 0 && (
+          <div className="flex items-end gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-amber-700">
+                Escalate to (super admin)
+              </label>
+              <select
+                value={escalateTargetId}
+                onChange={(e) => setEscalateTargetId(e.target.value)}
+                className="border border-amber-300 bg-white px-3 py-2.5 text-xs outline-none focus:border-amber-500"
+              >
+                <option value="">Select super admin…</option>
+                {superAdmins.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.full_name || a.username}
+                  </option>
+                ))}
+              </select>
+            </div>
             <button
               type="button"
-              disabled={saving || !targetAdminId || transferStatus === "pending"}
+              disabled={saving || !escalateTargetId || transferStatus === "pending"}
               onClick={() => act("escalate")}
               className="border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Escalate
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-3">
