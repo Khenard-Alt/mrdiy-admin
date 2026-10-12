@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
   let query = supabase
     .from("applications")
     .select(
-      "id, user_id, job_id, resume_url, status, match_score, created_at, updated_at, assigned_to, branch_id, tags, transfer_status, transfer_offer_branch_id, contract_start_date, contract_end_date"
+      "id, user_id, job_id, resume_url, status, match_score, created_at, updated_at, assigned_to, branch_id, tags, transfer_status, transfer_offer_branch_id, contract_start_date, contract_end_date, resignation_date, last_working_day, actual_last_day, clearance_completed_at, final_pay_released_at, awol_absence_since, awol_notice1_sent_at, awol_explanation_deadline, awol_explanation_received_at, awol_explanation_text, termination_reason"
     )
     .order("created_at", { ascending: false });
 
@@ -139,6 +139,14 @@ export async function GET(request: NextRequest) {
     // ignore
   }
 
+  // Best-effort: flag a resigned employee's final pay once it's overdue (DOLE
+  // Labor Advisory 06-20: 30 days from the last working day).
+  try {
+    await remindFinalPayOverdue(supabase, applicationRows);
+  } catch {
+    // ignore
+  }
+
   return NextResponse.json({ applications: combined });
 }
 
@@ -205,6 +213,79 @@ async function remindContractsEnding(
   }
 }
 
+/**
+ * Admin alert, once per application, when a resigned employee's final pay is
+ * overdue: more than 30 days since their last working day with no
+ * final_pay_released_at recorded (DOLE Labor Advisory 06-20 — ADMIN_MAJOR_PLAN.md
+ * §Q). A missed statutory deadline, not just a reminder, so it's worth flagging
+ * even though nothing in the UI sets final_pay_released_at yet.
+ */
+async function remindFinalPayOverdue(
+  supabase: ReturnType<typeof createAdminClient>,
+  applications: {
+    id: string;
+    status: string | null;
+    branch_id: string | null;
+    last_working_day?: string | null;
+    actual_last_day?: string | null;
+    final_pay_released_at?: string | null;
+  }[]
+) {
+  const deadline = new Date();
+  deadline.setDate(deadline.getDate() - 30);
+  const deadlineStr = deadline.toISOString().slice(0, 10);
+
+  const overdue = applications.filter((application) => {
+    if (normalizeStatus(application.status) !== "Resigned" || application.final_pay_released_at) return false;
+    // The real last day worked is the legal trigger once known — it can be
+    // earlier than the planned last_working_day (incomplete notice period).
+    const lastDay = application.actual_last_day ?? application.last_working_day;
+    return Boolean(lastDay) && lastDay! <= deadlineStr;
+  });
+  if (overdue.length === 0) return;
+
+  const { data: existingAlerts } = await supabase
+    .from("admin_alerts")
+    .select("application_id")
+    .eq("type", "FINAL_PAY_OVERDUE")
+    .in(
+      "application_id",
+      overdue.map((application) => application.id)
+    );
+  const alreadyAlerted = new Set((existingAlerts ?? []).map((row) => row.application_id));
+
+  const toAlert = overdue.filter((application) => !alreadyAlerted.has(application.id));
+  if (toAlert.length === 0) return;
+
+  const { data: admins } = await supabase
+    .from("admin_users")
+    .select("id, role, branch_id")
+    .eq("is_active", true);
+
+  const rows = toAlert.flatMap((application) =>
+    (admins ?? [])
+      .filter(
+        (admin) =>
+          admin.role === "super_admin" ||
+          admin.role === "hr_officer" ||
+          (admin.role === "branch_manager" && admin.branch_id === application.branch_id)
+      )
+      .map((admin) => ({
+        admin_id: admin.id,
+        type: "FINAL_PAY_OVERDUE",
+        title: "Final pay is overdue",
+        message: `A resigned employee's last working day was ${
+          application.actual_last_day ?? application.last_working_day
+        }. Final pay is past the 30-day legal deadline.`,
+        application_id: application.id,
+      }))
+  );
+
+  if (rows.length > 0) {
+    await supabase.from("admin_alerts").insert(rows);
+  }
+}
+
 export async function PATCH(request: NextRequest) {
   const session = requireAdminSession(request);
   if (!session) {
@@ -212,7 +293,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { id, status, tags } = body;
+  const { id, status, tags, markFinalPayReleased, actualLastDay } = body;
 
   if (!id) {
     return NextResponse.json({ error: "Application id is required." }, { status: 400 });
@@ -223,6 +304,33 @@ export async function PATCH(request: NextRequest) {
     const supabase = createAdminClient();
     const { error: tagError } = await supabase.from("applications").update({ tags }).eq("id", id);
     if (tagError) return NextResponse.json({ error: tagError.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
+  // Confirms the real last day an employee reported for work, which can be
+  // earlier than the planned last_working_day (incomplete notice period).
+  if (actualLastDay && status === undefined) {
+    const parsed = new Date(actualLastDay);
+    if (Number.isNaN(parsed.getTime())) {
+      return NextResponse.json({ error: "The actual last day is not valid." }, { status: 400 });
+    }
+    const supabase = createAdminClient();
+    const { error: dayError } = await supabase
+      .from("applications")
+      .update({ actual_last_day: parsed.toISOString().slice(0, 10) })
+      .eq("id", id);
+    if (dayError) return NextResponse.json({ error: dayError.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
+
+  // Marks a resigned employee's final pay as released — clears the overdue alert's cause.
+  if (markFinalPayReleased && status === undefined) {
+    const supabase = createAdminClient();
+    const { error: payError } = await supabase
+      .from("applications")
+      .update({ final_pay_released_at: new Date().toISOString() })
+      .eq("id", id);
+    if (payError) return NextResponse.json({ error: payError.message }, { status: 500 });
     return NextResponse.json({ ok: true });
   }
 

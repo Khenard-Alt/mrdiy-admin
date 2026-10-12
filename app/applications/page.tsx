@@ -10,6 +10,9 @@ import InterviewPanel from "./InterviewPanel";
 import RequirementsPanel from "./RequirementsPanel";
 import ProfileDocumentsPanel from "./ProfileDocumentsPanel";
 import ContractSignaturePanel from "./ContractSignaturePanel";
+import ResignationPanel from "./ResignationPanel";
+import AwolPanel from "./AwolPanel";
+import ExitChecklistPanel from "./ExitChecklistPanel";
 import RankingPanel from "./RankingPanel";
 import HandoffPanel from "./HandoffPanel";
 import NotesPanel from "./NotesPanel";
@@ -38,6 +41,13 @@ type Application = {
   contract_end_date?: string | null;
   resignation_date?: string | null;
   last_working_day?: string | null;
+  actual_last_day?: string | null;
+  final_pay_released_at?: string | null;
+  awol_absence_since?: string | null;
+  awol_notice1_sent_at?: string | null;
+  awol_explanation_deadline?: string | null;
+  awol_explanation_received_at?: string | null;
+  awol_explanation_text?: string | null;
 };
 
 type Assignee = {
@@ -93,6 +103,9 @@ export default function ApplicationsPage() {
     useState<ApplicationRow | null>(null);
 
   const [updating, setUpdating] = useState(false);
+  const [markingPay, setMarkingPay] = useState(false);
+  const [actualLastDayInput, setActualLastDayInput] = useState("");
+  const [confirmingLastDay, setConfirmingLastDay] = useState(false);
   const [emailNotice, setEmailNotice] = useState<{
     status: "sent" | "failed" | "invalid" | "not_configured";
     to: string | null;
@@ -252,6 +265,61 @@ export default function ApplicationsPage() {
       );
     } finally {
       setUpdating(false);
+    }
+  }
+
+  async function confirmActualLastDay(applicationId: string, actualLastDay: string) {
+    if (!actualLastDay) return;
+    setConfirmingLastDay(true);
+    setError("");
+    try {
+      const response = await fetch("/api/applications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: applicationId, actualLastDay }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not save the actual last day.");
+
+      setApplications((current) =>
+        current.map((item) => (item.id === applicationId ? { ...item, actual_last_day: actualLastDay } : item))
+      );
+      setSelectedApplication((current) =>
+        current && current.id === applicationId ? { ...current, actual_last_day: actualLastDay } : current
+      );
+      setActualLastDayInput("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the actual last day.");
+    } finally {
+      setConfirmingLastDay(false);
+    }
+  }
+
+  async function markFinalPayReleased(applicationId: string) {
+    setMarkingPay(true);
+    setError("");
+    try {
+      const response = await fetch("/api/applications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: applicationId, markFinalPayReleased: true }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not mark final pay as released.");
+
+      const releasedAt = new Date().toISOString();
+      setApplications((current) =>
+        current.map((item) =>
+          item.id === applicationId ? { ...item, final_pay_released_at: releasedAt } : item
+        )
+      );
+      setSelectedApplication((current) =>
+        current && current.id === applicationId ? { ...current, final_pay_released_at: releasedAt } : current
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not mark final pay as released.");
+    } finally {
+      setMarkingPay(false);
     }
   }
 
@@ -1289,6 +1357,148 @@ export default function ApplicationsPage() {
                   key={`${selectedApplication.id}-${reviewVersion}`}
                   applicationId={selectedApplication.id}
                 />
+              )}
+
+              {/* ==================================================
+                  RESIGNATION (Hired only — records a voluntary exit)
+              ================================================== */}
+
+              {normalizeStatus(selectedApplication.status) === "Hired" && (
+                <ResignationPanel
+                  key={`${selectedApplication.id}-resign-${reviewVersion}`}
+                  applicationId={selectedApplication.id}
+                  onResigned={(lastWorkingDay) => {
+                    setApplications((current) =>
+                      current.map((item) =>
+                        item.id === selectedApplication.id
+                          ? { ...item, status: "Resigned", last_working_day: lastWorkingDay }
+                          : item
+                      )
+                    );
+                    setSelectedApplication((current) =>
+                      current && current.id === selectedApplication.id
+                        ? { ...current, status: "Resigned", last_working_day: lastWorkingDay }
+                        : current
+                    );
+                    setReviewVersion((version) => version + 1);
+                  }}
+                />
+              )}
+
+              {/* ==================================================
+                  AWOL / TERMINATION (Hired only — twin-notice due process)
+              ================================================== */}
+
+              {normalizeStatus(selectedApplication.status) === "Hired" && (
+                <AwolPanel
+                  key={`${selectedApplication.id}-awol-${reviewVersion}`}
+                  applicationId={selectedApplication.id}
+                  absenceSince={selectedApplication.awol_absence_since ?? null}
+                  notice1SentAt={selectedApplication.awol_notice1_sent_at ?? null}
+                  explanationDeadline={selectedApplication.awol_explanation_deadline ?? null}
+                  explanationReceivedAt={selectedApplication.awol_explanation_received_at ?? null}
+                  explanationText={selectedApplication.awol_explanation_text ?? null}
+                  onStatusChange={(newStatus) => {
+                    setApplications((current) =>
+                      current.map((item) =>
+                        item.id === selectedApplication.id ? { ...item, status: newStatus } : item
+                      )
+                    );
+                    setSelectedApplication((current) =>
+                      current && current.id === selectedApplication.id ? { ...current, status: newStatus } : current
+                    );
+                    setReviewVersion((version) => version + 1);
+                  }}
+                  onCleared={() => setReviewVersion((version) => version + 1)}
+                />
+              )}
+
+              {/* ==================================================
+                  EXIT CHECKLIST (Resigned or Terminated)
+              ================================================== */}
+
+              {(normalizeStatus(selectedApplication.status) === "Resigned" ||
+                normalizeStatus(selectedApplication.status) === "Terminated") && (
+                <>
+                  <ExitChecklistPanel
+                    key={`${selectedApplication.id}-exit-${reviewVersion}`}
+                    applicationId={selectedApplication.id}
+                    onCleared={() => setReviewVersion((version) => version + 1)}
+                  />
+
+                  <section className="mt-6 border border-slate-200 p-6">
+                    <h3 className="text-lg font-bold text-slate-900">Actual Last Day Worked</h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      The planned last working day is {formatDate(selectedApplication.last_working_day ?? null)}.
+                      Confirm the real last day once you know it — it can be earlier if the employee stopped
+                      reporting before completing the notice period.
+                    </p>
+
+                    {selectedApplication.actual_last_day ? (
+                      <div className="mt-4">
+                        <p className="border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800">
+                          Confirmed: {formatDate(selectedApplication.actual_last_day)}
+                        </p>
+                        {selectedApplication.last_working_day &&
+                          selectedApplication.actual_last_day < selectedApplication.last_working_day && (
+                            <p className="mt-2 inline-flex border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">
+                              Incomplete notice — stopped {Math.round(
+                                (new Date(selectedApplication.last_working_day).getTime() -
+                                  new Date(selectedApplication.actual_last_day).getTime()) /
+                                  (1000 * 60 * 60 * 24)
+                              )} day(s) early
+                            </p>
+                          )}
+                      </div>
+                    ) : (
+                      <div className="mt-4 flex flex-wrap items-end gap-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Actual last day
+                          </label>
+                          <input
+                            type="date"
+                            value={actualLastDayInput}
+                            onChange={(event) => setActualLastDayInput(event.target.value)}
+                            className="border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#e30613]"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          disabled={confirmingLastDay || !actualLastDayInput}
+                          onClick={() => confirmActualLastDay(selectedApplication.id, actualLastDayInput)}
+                          className="border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:border-[#e30613] hover:text-[#e30613] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {confirmingLastDay ? "Saving…" : "Confirm actual last day"}
+                        </button>
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="mt-6 border border-slate-200 p-6">
+                    <h3 className="text-lg font-bold text-slate-900">Final Pay</h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Must be released within 30 days of the real last working day (
+                      {formatDate(selectedApplication.actual_last_day ?? selectedApplication.last_working_day ?? null)}
+                      ), per DOLE Labor Advisory 06-20.
+                    </p>
+
+                    {selectedApplication.final_pay_released_at ? (
+                      <p className="mt-4 border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-800">
+                        Released on {formatDate(selectedApplication.final_pay_released_at ?? null)}.
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={markingPay}
+                        onClick={() => markFinalPayReleased(selectedApplication.id)}
+                        className="mt-4 bg-[#e30613] px-5 py-3 text-sm font-semibold text-white hover:bg-[#c80511] disabled:opacity-50"
+                      >
+                        {markingPay ? "Saving…" : "Mark final pay as released"}
+                      </button>
+                    )}
+                  </section>
+                </>
               )}
 
               {/* CLOSE */}

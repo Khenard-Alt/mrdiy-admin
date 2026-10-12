@@ -14,6 +14,7 @@ export const STATUS_VALUES = [
   "Hired",
   "Contract Ended",
   "Resigned",
+  "Terminated",
   "Rejected",
   "On Hold",
   "Withdrawn",
@@ -38,6 +39,7 @@ const LABELS: Record<Status, string> = {
   Hired: "Hired",
   "Contract Ended": "Contract Ended",
   Resigned: "Resigned",
+  Terminated: "Terminated",
   Rejected: "Rejected",
   "On Hold": "On Hold",
   Withdrawn: "Withdrawn",
@@ -80,6 +82,8 @@ export function statusClasses(raw: string | null | undefined): string {
       return "border-amber-200 bg-amber-50 text-amber-700";
     case "Resigned":
       return "border-sky-200 bg-sky-50 text-sky-700";
+    case "Terminated":
+      return "border-rose-300 bg-rose-50 text-rose-800";
     case "Rejected":
       return "border-red-200 bg-red-50 text-red-700";
     case "Reviewed":
@@ -99,12 +103,14 @@ export function statusClasses(raw: string | null | undefined): string {
 
 /**
  * Statuses HR can set with a button. "Interview Scheduled" is set by scheduling an
- * interview, "Withdrawn" is set by the applicant withdrawing (not by HR), and
- * "Resigned" is set through the dedicated Resignation panel (it needs a resignation
- * date and computes a last working day, not just a one-click status change).
+ * interview, "Withdrawn" is set by the applicant withdrawing (not by HR), "Resigned"
+ * is set through the dedicated Resignation panel (needs a resignation date and
+ * computed last working day), and "Terminated" is set only by finishing the
+ * AWOL/Termination panel's twin-notice due process — never a one-click button,
+ * since abandonment isn't automatic under Philippine labor law.
  */
 export const SETTABLE_STATUSES: Status[] = STATUS_VALUES.filter(
-  (s) => s !== "Interview Scheduled" && s !== "Withdrawn" && s !== "Resigned"
+  (s) => s !== "Interview Scheduled" && s !== "Withdrawn" && s !== "Resigned" && s !== "Terminated"
 );
 
 // ---------------------------------------------------------------------------
@@ -174,6 +180,14 @@ export function statusContent(raw: string, jobTitle: string | null, firstName?: 
         note:
           `${hello}\n\nYour resignation from ${job} has been recorded. Please see the MR.DIY Careers app for your ` +
           "last working day and the exit checklist. We thank you for your service and wish you well.",
+      };
+    case "Terminated":
+      return {
+        title: "Your employment has ended",
+        alert: `Your employment for ${job} has ended. See the app for details and exit requirements.`,
+        note:
+          `${hello}\n\nYour employment for ${job} has ended. Please see the MR.DIY Careers app for the exit ` +
+          "checklist. If you have questions about this decision, please contact MR.DIY Human Resources.",
       };
     case "Rejected":
       return {

@@ -9,6 +9,7 @@ import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 
 type Employee = {
   applicationId: string;
+  status: string;
   applicantName: string | null;
   applicantEmail: string | null;
   applicantPhone: string | null;
@@ -21,6 +22,11 @@ type Employee = {
   signed: boolean;
   signedAt: string | null;
   hiredAt: string | null;
+  resignationDate: string | null;
+  lastWorkingDay: string | null;
+  actualLastDay: string | null;
+  clearanceCompleted: boolean;
+  finalPayReleased: boolean;
 };
 
 function formatDate(iso: string | null) {
@@ -72,8 +78,10 @@ export default function EmployeesPage() {
 
   useRealtimeRefresh(["applications"], load);
 
-  const contractual = employees.filter((e) => e.isContractual);
-  const regular = employees.filter((e) => !e.isContractual);
+  const resigned = employees.filter((e) => e.status === "Resigned" || e.status === "Terminated");
+  const active = employees.filter((e) => e.status !== "Resigned" && e.status !== "Terminated");
+  const contractual = active.filter((e) => e.isContractual);
+  const regular = active.filter((e) => !e.isContractual);
 
   return (
     <main className="min-h-screen bg-[#f5f6f8] text-slate-900">
@@ -113,6 +121,84 @@ export default function EmployeesPage() {
             </div>
           ) : (
             <div className="space-y-6">
+              {resigned.length > 0 && (
+                <section className="border border-slate-200 bg-white shadow-sm">
+                  <div className="border-b border-slate-200 px-6 py-4">
+                    <h2 className="text-base font-bold text-slate-900">Resigned / Terminated — pending exit</h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Still here until clearance and final pay are both done.
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[800px] text-left">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50">
+                          <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Employee</th>
+                          <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Position</th>
+                          <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Last working day</th>
+                          <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Clearance</th>
+                          <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Final pay</th>
+                          <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {resigned.map((e) => (
+                          <tr key={e.applicationId} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                            <td className="px-5 py-4 text-sm font-semibold text-slate-800">
+                              {e.applicantName || "—"}
+                              <span
+                                className={`ml-2 inline-flex border px-1.5 py-0.5 text-[10px] font-semibold ${
+                                  e.status === "Terminated"
+                                    ? "border-rose-300 bg-rose-50 text-rose-800"
+                                    : "border-sky-200 bg-sky-50 text-sky-700"
+                                }`}
+                              >
+                                {e.status}
+                              </span>
+                              <p className="mt-0.5 text-xs font-normal text-slate-400">{e.branchName || "—"}</p>
+                            </td>
+                            <td className="px-5 py-4 text-sm text-slate-600">{e.jobTitle || "—"}</td>
+                            <td className="px-5 py-4 text-sm text-slate-600">
+                              {formatDate(e.actualLastDay ?? e.lastWorkingDay)}
+                              {e.actualLastDay && e.lastWorkingDay && e.actualLastDay < e.lastWorkingDay && (
+                                <p className="mt-0.5 text-[11px] font-semibold text-amber-700">Incomplete notice</p>
+                              )}
+                            </td>
+                            <td className="px-5 py-4">
+                              <span
+                                className={`inline-flex border px-2.5 py-1 text-[11px] font-semibold ${
+                                  e.clearanceCompleted
+                                    ? "border-green-200 bg-green-50 text-green-700"
+                                    : "border-amber-200 bg-amber-50 text-amber-700"
+                                }`}
+                              >
+                                {e.clearanceCompleted ? "Complete" : "Pending"}
+                              </span>
+                            </td>
+                            <td className="px-5 py-4">
+                              <span
+                                className={`inline-flex border px-2.5 py-1 text-[11px] font-semibold ${
+                                  e.finalPayReleased
+                                    ? "border-green-200 bg-green-50 text-green-700"
+                                    : "border-amber-200 bg-amber-50 text-amber-700"
+                                }`}
+                              >
+                                {e.finalPayReleased ? "Released" : "Pending"}
+                              </span>
+                            </td>
+                            <td className="px-5 py-4 text-right">
+                              <Link href="/applications" className="text-xs font-semibold text-[#e30613] hover:underline">
+                                Open in Applications →
+                              </Link>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
+
               {contractual.length > 0 && (
                 <section className="border border-slate-200 bg-white shadow-sm">
                   <div className="border-b border-slate-200 px-6 py-4">

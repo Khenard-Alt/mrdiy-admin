@@ -249,8 +249,19 @@ Hiningi: i-check kung paano ang proseso para sa mga empleyadong **mag-re-resign*
 1. **Automatic na i-compute** ang `last_working_day` = `resignation_date` + 30 araw (default), puwedeng i-edit ng HR/Branch Manager kung tinanggap nila ang mas maikling notice (parehong pattern ng contract-dates computation sa Seksyon P).
 2. **Kasama na agad ang clearance checklist** sa unang bersyon — bagong "exit checklist" table (parehong pattern ng `pre_employment_requirements`, pero exit items: ID, uniform, company assets, atbp.), may sariling panel gaya ng `RequirementsPanel.tsx`.
 
-**Natitirang tanong:**
-3. Dapat bang sagutin muna ng applicant sa mobile app ang resignation (parang "I am resigning" submission mula sa kanilang side), o puro admin-side entry lang (HR/Branch Manager ang nagta-type ng detalye batay sa sinabi ng empleyado nang personal/sa labas ng app)?
+**Desisyon:**
+3. **Admin-side entry lang muna** — HR/Branch Manager ang nagta-type ng resignation details, hindi kailangan ng Android app changes para dito.
+
+**Status: Tapos na ang code (2026-10-13), hindi pa na-verify live.** Migration: `202610130004_resignation.sql`. Bagong status `Resigned` (`lib/pipeline.ts`), `app/api/applications/resign/route.ts`, `app/api/exit-checklist/route.ts`, `app/applications/ResignationPanel.tsx`, `app/applications/ExitChecklistPanel.tsx`, final-pay button + 30-day overdue compliance alert sa `app/api/applications/route.ts`.
+
+**Follow-up gap na natuklasan (2026-10-13) — "incomplete notice" / AWOL habang nag-aabiso:**
+
+Tanong: paano kung hindi tinapos ng empleyado ang 30-araw na notice (tumigil nang maaga), pero may final pay pa ring inaantay — paano ito mare-reflect?
+
+- **Dalawang magkaibang petsa kailangan:** `last_working_day` (PLANNED, 30-araw default) vs. `actual_last_day` (TOTOONG huling araw na pumasok, null hanggang i-confirm ng HR).
+- **Walang automatic na parusa/bawas sa sahod** — tanda lang ang "Incomplete notice" flag, desisyon pa rin ng HR/Legal kung may babawasing claim (tugma sa research: hindi automatic forfeiture, kailangang i-prove/i-quantify ng employer).
+- **Ang 30-araw na final-pay deadline ay dapat mula sa ACTUAL last day** kapag alam na ito (mas maaga kaysa planned kung AWOL) — kung hindi pa alam, planned muna ang gagamitin bilang tantiya.
+- **Status: Tapos na ang code (2026-10-13), hindi pa na-verify live.** Migration: `202610130005_actual_last_day.sql`. Bagong column `actual_last_day`, bagong "Confirm actual last day" button + "Incomplete notice — stopped N day(s) early" badge sa `app/applications/page.tsx`, na-update ang `remindFinalPayOverdue` sa `app/api/applications/route.ts` para gamitin ang `actual_last_day ?? last_working_day`.
 
 ### J. Seguridad at audit
 - Password hashing, limit sa maling login, session na mapapawalang-bisa.
