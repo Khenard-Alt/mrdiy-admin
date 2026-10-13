@@ -271,7 +271,9 @@ export default function InterviewCalendarPage() {
                             {dayInterviews.slice(0, 4).map((interview) => (
                               <span
                                 key={interview.id}
-                                className={`h-1.5 w-1.5 rounded-full ${RESPONSE_DOT[interview.applicantResponse]}`}
+                                className={`h-1.5 w-1.5 rounded-full ${
+                                  interview.status === "Completed" ? "bg-slate-400" : RESPONSE_DOT[interview.applicantResponse]
+                                }`}
                               />
                             ))}
                           </span>
@@ -315,13 +317,26 @@ export default function InterviewCalendarPage() {
                         <p className="mt-1 text-xs text-slate-500">
                           {interview.mode === "online" ? "Online" : interview.venue || "—"}
                         </p>
-                        <span
-                          className={`mt-2 inline-flex w-fit border px-2 py-0.5 text-[11px] font-semibold ${RESPONSE_STYLE[interview.applicantResponse]}`}
-                        >
-                          {interview.applicantResponse === "Pending"
-                            ? "Awaiting response"
-                            : interview.applicantResponse}
-                        </span>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {interview.status === "Completed" ? (
+                            <span className="inline-flex w-fit border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                              Done
+                            </span>
+                          ) : (
+                            <span
+                              className={`inline-flex w-fit border px-2 py-0.5 text-[11px] font-semibold ${RESPONSE_STYLE[interview.applicantResponse]}`}
+                            >
+                              {interview.applicantResponse === "Pending"
+                                ? "Awaiting response"
+                                : interview.applicantResponse}
+                            </span>
+                          )}
+                          {interview.status === "Rescheduled" && (
+                            <span className="inline-flex w-fit border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                              Rescheduled
+                            </span>
+                          )}
+                        </div>
                       </Link>
                     </li>
                   ))}

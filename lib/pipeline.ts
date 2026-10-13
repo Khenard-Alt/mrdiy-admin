@@ -250,6 +250,29 @@ export const PROFILE_DOCUMENTS = [
 ] as const;
 
 // ---------------------------------------------------------------------------
+// Follow-up deadlines for pre-employment documents, counted from the day the
+// applicant is Hired (when the checklist row is created). Not required
+// before signing the contract — only the signed contract itself needs to be
+// ready at that point (see ADMIN_MAJOR_PLAN.md). These are common-practice
+// ranges from research, not a single statute, so HR can adjust them:
+//   - BIR Form 1902 / TIN: 10 days (closest to a fixed statutory deadline)
+//   - SSS, PhilHealth, Pag-IBIG: 30 days (the employer's own registration
+//     window; commonly cited as due before the first payroll run)
+//   - NBI Clearance, Medical, Signed Contract: 7 days (no statutory
+//     deadline found — a reasonable follow-up window)
+// ---------------------------------------------------------------------------
+
+export const REQUIREMENT_DUE_DAYS: Record<string, number> = {
+  "SSS Number / E-1 Form": 30,
+  "PhilHealth Member Data Record (MDR)": 30,
+  "Pag-IBIG MID Number / Member Data Form": 30,
+  "NBI Clearance / Police Clearance": 7,
+  "Pre-Employment Medical Exam / Health Permit": 7,
+  "BIR Form 1902 / TIN": 10,
+  "Signed Employment Contract": 7,
+};
+
+// ---------------------------------------------------------------------------
 // Exit checklist (created when an applicant resigns)
 // ---------------------------------------------------------------------------
 

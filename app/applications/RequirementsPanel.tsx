@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { REQUIREMENT_DUE_DAYS } from "@/lib/pipeline";
 
 type Requirement = {
   id: string;
@@ -9,8 +10,17 @@ type Requirement = {
   document_url: string | null;
   remarks: string | null;
   fileUrl: string | null;
+  created_at: string;
   updated_at: string;
 };
+
+/** Days left (negative once overdue) until this requirement's follow-up deadline, or null if it has none. */
+function daysUntilDue(row: Requirement): number | null {
+  const dueDays = REQUIREMENT_DUE_DAYS[row.requirement_name];
+  if (dueDays === undefined) return null;
+  const dueAt = new Date(row.created_at).getTime() + dueDays * 24 * 60 * 60 * 1000;
+  return Math.ceil((dueAt - Date.now()) / (24 * 60 * 60 * 1000));
+}
 
 const STATUS_STYLE: Record<Requirement["status"], string> = {
   Pending: "border-slate-200 bg-slate-50 text-slate-600",
@@ -81,6 +91,7 @@ export default function RequirementsPanel({ applicationId }: { applicationId: st
 
   const verified = (rows ?? []).filter((row) => row.status === "Verified").length;
   const total = (rows ?? []).length;
+  const overdue = (rows ?? []).filter((row) => row.status !== "Verified" && (daysUntilDue(row) ?? 1) < 0).length;
 
   return (
     <section className="mt-6 border border-slate-200 p-6">
@@ -91,11 +102,18 @@ export default function RequirementsPanel({ applicationId }: { applicationId: st
             The applicant uploads each document in the app. Check it, then verify it or send it back with a reason.
           </p>
         </div>
-        {total > 0 && (
-          <span className="border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700">
-            {verified} of {total} verified
-          </span>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {overdue > 0 && (
+            <span className="border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700">
+              {overdue} overdue — needs follow-up
+            </span>
+          )}
+          {total > 0 && (
+            <span className="border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700">
+              {verified} of {total} verified
+            </span>
+          )}
+        </div>
       </div>
 
       {rows === null && <p className="mt-4 text-sm text-slate-500">Loading…</p>}
@@ -125,6 +143,25 @@ export default function RequirementsPanel({ applicationId }: { applicationId: st
               <span className={`inline-flex border px-3 py-1 text-xs font-semibold ${STATUS_STYLE[row.status]}`}>
                 {STATUS_TEXT[row.status]}
               </span>
+              {row.status !== "Verified" && (() => {
+                const days = daysUntilDue(row);
+                if (days === null) return null;
+                if (days < 0) {
+                  return (
+                    <span className="inline-flex border border-red-300 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+                      Overdue by {Math.abs(days)} day{Math.abs(days) === 1 ? "" : "s"} — follow up
+                    </span>
+                  );
+                }
+                if (days <= 2) {
+                  return (
+                    <span className="inline-flex border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                      Due in {days} day{days === 1 ? "" : "s"}
+                    </span>
+                  );
+                }
+                return null;
+              })()}
               {row.document_url && row.status !== "Verified" && (
                 <>
                   <button

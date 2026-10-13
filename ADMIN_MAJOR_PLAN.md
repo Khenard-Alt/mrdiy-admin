@@ -100,6 +100,9 @@ Ang tinutukoy mong "magpapasahan." Ito ay mangyayari sa admin, at makikita rin n
 - I-reschedule at i-cancel, bawat isa ay may notification at email.
 - **Kumpirmasyon ng applicant** (Confirm / Can't attend) at makikita ng admin ang sagot.
 - **Kalendaryo** ng mga paparating na interview sa dashboard. Tapos na ang code + na-verify ang build — dedikadong page sa `/interviews/calendar`: month-grid calendar (walang external library) + side list panel sa kanan (walang modal), branch-scoped para sa branch_manager, may count badge at response-status dots (yellow/green/red) sa bawat araw na may interview. Link na "View full calendar →" idinagdag sa Dashboard's Upcoming Interviews widget, at bagong item sa Sidebar ("Interview Calendar"). API: `GET /api/interviews/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD`.
+- **Ready to Interview queue (dagdag 2026-10-14):** napansin na kulang ang calendar — nakikita lang ang mga NA-SCHEDULE na, walang paraan para makita kung sino ang **Shortlisted pa lang at handa nang i-interview** (hindi pa naka-set ang petsa). Dinagdagan ang `/api/interviews/calendar` ng `readyToInterview` list — lahat ng application na status ay "Shortlisted" (branch-scoped), kasi ito mismo ang eksaktong kahulugan ng "ready, hindi pa naka-schedule": ang pag-schedule ng interview ang siyang nagpapalit ng status papuntang "Interview Scheduled" (`app/api/interviews/route.ts`), at pag-cancel ay bumabalik sa "Shortlisted" — walang kailangang hiwalay na join o flag. Bagong "Ready to Interview" section sa ibaba ng calendar page, click-through papunta sa Applications page.
+- **Deep-link papuntang Applications (dagdag 2026-10-14):** `/applications?open=<applicationId>` — binubuksan agad ang modal ng specific na application pagka-load, tapos nililinis ang URL. Ginamit ito ng Ready to Interview queue at ng interview list sa calendar (dating diretso lang sa `/applications` na walang context).
+- **"Done"/Completed status hindi nakikita sa calendar (nahanap 2026-10-14):** pag "Mark as done" sa `InterviewPanel.tsx` (nagse-set ng `interviews.status = "Completed"`), wala namang nagbabago sa calendar — laging ang `applicantResponse` (Confirmed/Pending/Declined) lang ang ipinapakita, kahit tapos na pala ang interview. Fix: side-list panel ngayon ay may hiwalay na **"Done"** badge pag `status === "Completed"` (sa halip na ipakita ang lumang response), at **"Rescheduled"** badge pag naka-reschedule. Pati ang mga dots sa calendar grid — kulay abo na ngayon ang dot ng completed interviews sa halip na response color.
 - Paalala sa applicant isang araw bago.
 
 ### E. Applicant 360 (kumpletong view ng applicant)
@@ -326,6 +329,30 @@ Kapalit ng "i-print → pisikal na pirmahan → kunan ng litrato → i-upload" �
   - `applyOnce()` (`ApplicationsRepository.kt`) — dinagdagan din ng parehong check bilang **server-side guard** (defense in depth), hindi lang UI — kung sakaling ma-bypass ang disabled button.
   - Dating generic na "Application failed. Please try again." na error toast — pinalitan para ipakita na ang totoong error message (hal. "You are already employed and cannot apply for another job right now."), hindi na laging generic.
 - Gradle build successful. Hindi pa na-verify live.
+
+**R7.1. Mas malinaw na "already employed" na mensahe + research sa branch transfer (dagdag 2026-10-14)**
+
+- **Research question:** kapag may contract na si applicant tapos ililipat sa ibang branch (nagyayari talaga sa totoong operations) — pwede ba siyang basta mag-apply ulit, o iba ang proseso?
+- **Sagot (Philippine jurisprudence, hindi iisang batas — management prerogative doctrine):** ang paglipat ng empleyado sa ibang branch ay desisyon ng **employer/HR** ("management prerogative"), hindi self-service na aksyon ng empleyado. Legal ito basta hindi demotion, hindi babaan ang sahod/benefits, at hindi "unreasonable, inconvenient or prejudicial" — pero **hindi ito ginagawa sa pamamagitan ng pag-apply sa bagong job posting.** Ang pagtanggi sa valid na transfer ay pwede ngang maging "willful disobedience" (Article 297) — kaya mahalagang hindi ito ipakita bilang parang bagong trabaho lang.
+- **Gagawin / tapos na:** sa halip na basta i-disable ang Apply button na walang paliwanag, ngayon naka-enable pa rin ito pero pag pinindot habang Hired na, lalabas ang `MaterialAlertDialogBuilder` dialog: "You're already employed" + pangalan ng kasalukuyang position/branch (galing sa bagong `ApplicationsRepository.currentEmployment()`, pinalitan ang dating `hasActiveEmployment()` boolean-only check) + paliwanag na hindi ito ginagawa sa pag-apply + **"Message HR"** button na diretso sa Messages tab.
+- Gradle build successful. Hindi pa na-verify live.
+
+### T. Follow-up/overdue na pre-employment requirements (research + dagdag 2026-10-14)
+
+**Research question:** ano talaga ang kailangan bago/pag-sign ng employment contract — kailangan bang kumpleto muna lahat ng 7 requirements?
+
+- **Sagot (base sa research, hindi iisang statute, karaniwang practice lang):** **hindi.** Ang kontrata mismo lang ang dapat tapos na sa o bago ang unang araw. Obligasyon ng **EMPLOYER** (hindi applicant) ang pag-register sa SSS/PhilHealth/Pag-IBIG, karaniwang sa loob ng 30 araw mula pagsisimula (bago pa ang unang payroll, ayon sa ibang guide). Ang TIN/BIR Form 1902 ay may mas mahigpit na 10-araw na deadline. Walang istrikong legal deadline ang NBI Clearance/Medical — policy ng employer na lang.
+- **Ibig sabihin, tama na ang disenyo natin** — hindi naka-gate ang `ContractSignaturePanel` sa completion ng `RequirementsPanel` (magkahiwalay sila talaga, at dapat nga). Pero **kulang tayo ng paraan para ma-follow-up** ang mga late na requirement — static checklist lang, walang indikasyon kung sino ang dapat habulin.
+- **Gagawin / tapos na:**
+  - `lib/pipeline.ts` — bagong `REQUIREMENT_DUE_DAYS` map, bilang ng araw mula sa pagiging Hired (per-item, hindi iisang deadline para sa lahat): SSS/PhilHealth/Pag-IBIG = 30 araw, TIN = 10 araw, NBI/Medical/Signed Contract = 7 araw.
+  - `app/api/requirements/route.ts` — dinagdagan ng `created_at` sa GET select (ginagamit bilang reference point ng "simula ng countdown," dahil dito nagsisimula ang checklist row kapag Hired).
+  - `app/applications/RequirementsPanel.tsx` — bagong "Overdue by X days — follow up" (pula) o "Due in X days" (amber, kung 2 araw na lang) na badge sa bawat item. May overall na "X overdue — needs follow-up" count sa header ng panel para mabilis makita ng HR kung sino ang dapat habulin.
+- Build successful.
+
+**T1. Dagdag (request ng user 2026-10-14): notice sa app ng applicant + admin notification**
+
+- **Applicant-side notice** (`mrdiyreact`): `app/src/main/java/com/mrdiy/careers/ui/base/DateText.kt` — bagong `daysUntil(iso, dueDays)` helper. `ApplicationDetailFragment.kt` — kinopya ang parehong `REQUIREMENT_DUE_DAYS` map (Kotlin version, dahil web-only ang `lib/pipeline.ts`), nagpapakita na ngayon ng "Due in X days" o "Overdue by X days — please submit as soon as possible" sa ilalim ng bawat hindi pa Verified na item sa **My Application → Pre-employment documents** screen. Gradle build successful.
+- **Admin notification** (`mrdiy-admin`): bagong `remindRequirementsOverdue()` sa `app/api/applications/route.ts`, parehong lazy-trigger pattern ng `remindContractsEnding`/`remindFinalPayOverdue` — tumitingin sa lahat ng Hired applicant's `pre_employment_requirements`, kapag may lumagpas na sa sariling due-date (`REQUIREMENT_DUE_DAYS`), gumagawa ng `admin_alerts` row (type `REQUIREMENT_OVERDUE`) papunta sa super_admin/hr_officer/branch manager ng kanilang branch — makikita sa Alerts bell. Isang beses lang per application ang alert (parehong simplification ng ibang dalawang reminder — hindi muna hiwalay per-item), checked lazily sa bawat `/api/applications` load, walang bagong cron/migration kailangan. Build successful.
 
 ### S. Admin web bug — paulit-ulit na nagde-download ang resume (nahanap at na-ayos 2026-10-14)
 

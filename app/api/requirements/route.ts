@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("pre_employment_requirements")
-    .select("id, requirement_name, status, document_url, remarks, updated_at")
+    .select("id, requirement_name, status, document_url, remarks, created_at, updated_at")
     .eq("application_id", applicationId)
     .order("created_at", { ascending: true });
 

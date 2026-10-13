@@ -6,6 +6,7 @@ import {
   isKnownStatus,
   normalizeStatus,
   PRE_EMPLOYMENT_REQUIREMENTS,
+  REQUIREMENT_DUE_DAYS,
   statusContent,
 } from "@/lib/pipeline";
 import { sendApplicantEmail, type EmailKind, type EmailResult } from "@/lib/email";
@@ -173,6 +174,14 @@ export async function GET(request: NextRequest) {
     // ignore
   }
 
+  // Best-effort: flag a Hired applicant's pre-employment documents once any
+  // of them pass their follow-up deadline (ADMIN_MAJOR_PLAN.md §T).
+  try {
+    await remindRequirementsOverdue(supabase, applicationRows);
+  } catch {
+    // ignore
+  }
+
   return NextResponse.json({ applications: combined });
 }
 
@@ -306,6 +315,84 @@ async function remindFinalPayOverdue(
         application_id: application.id,
       }))
   );
+
+  if (rows.length > 0) {
+    await supabase.from("admin_alerts").insert(rows);
+  }
+}
+
+/**
+ * Admin alert, once per application, once any of a Hired applicant's pre-employment
+ * documents passes its follow-up deadline (ADMIN_MAJOR_PLAN.md §T — per-item ranges,
+ * not a single statute: SSS/PhilHealth/Pag-IBIG 30 days, TIN 10 days, the rest 7 days,
+ * counted from when the checklist row was created). Re-alerts only if a fresh overdue
+ * item appears after the application's one existing alert is cleared — the same
+ * "once per application" simplification the other two reminders use.
+ */
+async function remindRequirementsOverdue(
+  supabase: ReturnType<typeof createAdminClient>,
+  applications: { id: string; status: string | null; branch_id: string | null }[]
+) {
+  const hiredIds = applications
+    .filter((application) => normalizeStatus(application.status) === "Hired")
+    .map((application) => application.id);
+  if (hiredIds.length === 0) return;
+
+  const { data: requirementRows } = await supabase
+    .from("pre_employment_requirements")
+    .select("application_id, requirement_name, created_at")
+    .in("application_id", hiredIds)
+    .neq("status", "Verified");
+  if (!requirementRows || requirementRows.length === 0) return;
+
+  const now = Date.now();
+  const overdueByApplication = new Map<string, string[]>();
+  for (const row of requirementRows) {
+    const dueDays = REQUIREMENT_DUE_DAYS[row.requirement_name];
+    if (!dueDays) continue;
+    const dueAt = new Date(row.created_at).getTime() + dueDays * 24 * 60 * 60 * 1000;
+    if (now <= dueAt) continue;
+    const names = overdueByApplication.get(row.application_id) ?? [];
+    names.push(row.requirement_name);
+    overdueByApplication.set(row.application_id, names);
+  }
+  if (overdueByApplication.size === 0) return;
+
+  const overdueAppIds = [...overdueByApplication.keys()];
+
+  const { data: existingAlerts } = await supabase
+    .from("admin_alerts")
+    .select("application_id")
+    .eq("type", "REQUIREMENT_OVERDUE")
+    .in("application_id", overdueAppIds);
+  const alreadyAlerted = new Set((existingAlerts ?? []).map((row) => row.application_id));
+
+  const toAlert = overdueAppIds.filter((id) => !alreadyAlerted.has(id));
+  if (toAlert.length === 0) return;
+
+  const { data: admins } = await supabase
+    .from("admin_users")
+    .select("id, role, branch_id")
+    .eq("is_active", true);
+
+  const rows = toAlert.flatMap((applicationId) => {
+    const application = applications.find((item) => item.id === applicationId);
+    const names = overdueByApplication.get(applicationId) ?? [];
+    return (admins ?? [])
+      .filter(
+        (admin) =>
+          admin.role === "super_admin" ||
+          admin.role === "hr_officer" ||
+          (admin.role === "branch_manager" && admin.branch_id === application?.branch_id)
+      )
+      .map((admin) => ({
+        admin_id: admin.id,
+        type: "REQUIREMENT_OVERDUE",
+        title: "Pre-employment document overdue",
+        message: `${names.length} document${names.length === 1 ? "" : "s"} overdue for a hired applicant: ${names.join(", ")}.`,
+        application_id: applicationId,
+      }));
+  });
 
   if (rows.length > 0) {
     await supabase.from("admin_alerts").insert(rows);
