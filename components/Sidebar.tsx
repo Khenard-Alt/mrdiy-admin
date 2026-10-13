@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/jobs", label: "Jobs", roles: ["super_admin", "hr_officer"] as AdminRole[] },
   { href: "/applications", label: "Applications" },
+  { href: "/interviews/calendar", label: "Interview Calendar" },
   { href: "/employees", label: "Employees" },
   { href: "/messages", label: "Messages" },
   { href: "/analytics", label: "Analytics" },

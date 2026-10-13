@@ -1305,7 +1305,7 @@ export default function ApplicationsPage() {
               <InterviewPanel
                 key={selectedApplication.id}
                 applicationId={selectedApplication.id}
-                defaultVenue={selectedApplication.job?.location ?? ""}
+                defaultVenue={selectedApplication.branch?.name ?? selectedApplication.job?.location ?? ""}
                 onStatusChange={(newStatus) => {
                   setApplications((current) =>
                     current.map((item) =>
@@ -1354,7 +1354,7 @@ export default function ApplicationsPage() {
 
               {normalizeStatus(selectedApplication.status) === "Hired" && (
                 <RequirementsPanel
-                  key={`${selectedApplication.id}-${reviewVersion}`}
+                  key={`${selectedApplication.id}-requirements-${reviewVersion}`}
                   applicationId={selectedApplication.id}
                 />
               )}

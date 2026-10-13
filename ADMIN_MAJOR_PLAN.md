@@ -99,7 +99,7 @@ Ang tinutukoy mong "magpapasahan." Ito ay mangyayari sa admin, at makikita rin n
 - I-schedule: petsa, oras, lugar (default ang branch ng job) o online link, notes.
 - I-reschedule at i-cancel, bawat isa ay may notification at email.
 - **Kumpirmasyon ng applicant** (Confirm / Can't attend) at makikita ng admin ang sagot.
-- **Kalendaryo** ng mga paparating na interview sa dashboard.
+- **Kalendaryo** ng mga paparating na interview sa dashboard. Tapos na ang code + na-verify ang build — dedikadong page sa `/interviews/calendar`: month-grid calendar (walang external library) + side list panel sa kanan (walang modal), branch-scoped para sa branch_manager, may count badge at response-status dots (yellow/green/red) sa bawat araw na may interview. Link na "View full calendar →" idinagdag sa Dashboard's Upcoming Interviews widget, at bagong item sa Sidebar ("Interview Calendar"). API: `GET /api/interviews/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD`.
 - Paalala sa applicant isang araw bago.
 
 ### E. Applicant 360 (kumpletong view ng applicant)
@@ -309,6 +309,12 @@ Kapalit ng "i-print → pisikal na pirmahan → kunan ng litrato → i-upload" �
 - Bagong `ui/applications/SignContractFragment.kt` — scroll-to-read ang kontrata text bago mag-unlock ang signature pad ("I agree" pattern, parehong desisyon sa Branch Manager's countersignature sa Seksyon P)
 - Sa `ApplicationDetailFragment.kt`'s checklist: kapag ang item ay **"Signed Employment Contract"** mismo, "Sign" button na ang lalabas sa halip na "Upload" — bubuksan ang bagong screen sa halip na file picker
 - Gradle build successful, pero **hindi pa na-test sa totoong device/emulator**
+
+**R6. `resume_text` na blangko kahit may resume file na — "No resume"/walang match % kahit nag-upload na (nahanap 2026-10-14)**
+
+- Nangyari kay Viviene: may `resume_url` (file na naka-upload sa `resumes` bucket), pero `null` ang `resume_text` — base sa Android code (`UserProfile.kt` linya 33, `canShowMatch`), ang match-score badge sa Jobs ay tumitingin lang sa `resume_text`, hindi sa existence ng file mismo. Nangyari ito sa mga account/resume bago pa ang resume-text-sync fix, o na-seed diretso sa database.
+- **Gagawin / tapos na:** `ProfileRepository.kt` → bagong `backfillResumeTextIfMissing()`, tinatawag sa loob ng `loadProfile()`. Kapag may `resume_url` pero blangko ang `resume_text`, i-da-download ulit ang file mula sa storage, i-re-extract ang text (`ResumeRepository.extractText`), i-parse ang skills (bagong `parseResumeUnchecked()` — kapareho ng `parseResume()` pero walang validity check, dahil tanggap na ang file noong una itong na-upload), at i-save pabalik sa `profiles.resume_text`/`skills` gamit ang existing na `persistResume()`. Lazy/on-read pattern — tatakbo lang minsan bawat account, wala nang gagawin pag may laman na ang `resume_text`.
+- Gradle build successful. Hindi pa na-verify live kay Viviene (kailangan mag-reload ng Profile/Jobs sa kanyang account sa app).
 
 ### J. Seguridad at audit
 - Password hashing, limit sa maling login, session na mapapawalang-bisa.

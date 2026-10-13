@@ -306,6 +306,12 @@ export default function DashboardPage() {
                   The next {upcomingInterviews.length} scheduled, soonest first.
                 </p>
               </div>
+              <Link
+                href="/interviews/calendar"
+                className="text-xs font-semibold text-[#e30613] hover:underline"
+              >
+                View full calendar →
+              </Link>
             </div>
 
             {upcomingInterviews.length === 0 ? (
