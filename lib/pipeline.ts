@@ -237,12 +237,16 @@ export const PRE_EMPLOYMENT_REQUIREMENTS = [
 
 // ---------------------------------------------------------------------------
 // Profile-level documents (optional, uploadable any time from the applicant's
-// profile — not tied to one application, and not required to apply)
+// profile — not tied to one application, and not required to apply).
+// Excludes "Signed Employment Contract": there is no contract to sign until
+// the applicant is actually Hired, so that item only belongs in the post-hire
+// checklist above, never in this always-open profile list (caught 2026-10-13
+// — it showed as uploadable before anyone had even applied).
 // ---------------------------------------------------------------------------
 
 export const PROFILE_DOCUMENTS = [
   "Valid ID (with signature)",
-  ...PRE_EMPLOYMENT_REQUIREMENTS,
+  ...PRE_EMPLOYMENT_REQUIREMENTS.filter((item) => item !== "Signed Employment Contract"),
 ] as const;
 
 // ---------------------------------------------------------------------------

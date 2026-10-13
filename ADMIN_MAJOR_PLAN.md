@@ -261,7 +261,54 @@ Tanong: paano kung hindi tinapos ng empleyado ang 30-araw na notice (tumigil nan
 - **Dalawang magkaibang petsa kailangan:** `last_working_day` (PLANNED, 30-araw default) vs. `actual_last_day` (TOTOONG huling araw na pumasok, null hanggang i-confirm ng HR).
 - **Walang automatic na parusa/bawas sa sahod** — tanda lang ang "Incomplete notice" flag, desisyon pa rin ng HR/Legal kung may babawasing claim (tugma sa research: hindi automatic forfeiture, kailangang i-prove/i-quantify ng employer).
 - **Ang 30-araw na final-pay deadline ay dapat mula sa ACTUAL last day** kapag alam na ito (mas maaga kaysa planned kung AWOL) — kung hindi pa alam, planned muna ang gagamitin bilang tantiya.
-- **Status: Tapos na ang code (2026-10-13), hindi pa na-verify live.** Migration: `202610130005_actual_last_day.sql`. Bagong column `actual_last_day`, bagong "Confirm actual last day" button + "Incomplete notice — stopped N day(s) early" badge sa `app/applications/page.tsx`, na-update ang `remindFinalPayOverdue` sa `app/api/applications/route.ts` para gamitin ang `actual_last_day ?? last_working_day`.
+- **Status: Tapos na ang code + na-verify live (2026-10-13).** Migration: `202610130005_actual_last_day.sql`. Bagong column `actual_last_day`, bagong "Confirm actual last day" button + "Incomplete notice — stopped N day(s) early" badge sa `app/applications/page.tsx`, na-update ang `remindFinalPayOverdue` sa `app/api/applications/route.ts` para gamitin ang `actual_last_day ?? last_working_day`. Na-test: 16-araw na "incomplete notice" scenario, tamang computation.
+
+**Follow-up: AWOL/Termination (hiwalay sa Resignation) — tapos na, na-verify live (2026-10-13).** Hindi automatic ang "deemed resigned" sa Pilipinas (*Aliten v. U-Need Lumber*, G.R. 168931, 2006) — kailangan ng "twin-notice" due process: (1) return-to-work notice + abot sa empleyado, (2) pagkakataong magpaliwanag, (3) termination notice. Bagong status **"Terminated"**, hiwalay sa "Resigned". Migration: `202610130006_awol_termination.sql`. `app/api/applications/awol/route.ts` (4 actions: `notice1`, `explanation`, `reinstate`, `terminate`), `app/applications/AwolPanel.tsx`. Ginagamit muli ang parehong Exit Checklist/Final Pay mula sa Resignation flow. Na-test nang buo: notice1 → explanation → terminate (gumana), notice1 → reinstate (bumalik sa Hired), skip-step at branch-scoping guards (naka-block nang tama).
+
+### R. Android app follow-ups — PLANO PA LANG, hindi pa code (research 2026-10-13, `mrdiyreact`)
+
+Base sa totoong pagtingin sa Kotlin code (hindi haka-haka) — apat na bagay:
+
+**R1. Status na HINDI pa kilala ng Android app: Resigned, Terminated, Contract Ended**
+
+- `ApplicationDetailFragment.kt` → `timelineCard(status)` (linya 148-158): hardcoded lang sa `["Pending","Reviewed","Shortlisted","Interview Scheduled","Hired"]`. Kapag Resigned/Terminated/Contract Ended ang status, **bumabalik sa index 0 ("Submitted")** — mali, hindi lang blangko.
+- `statusChip(status)` (linya 403-419): walang branch para sa 3 bagong status — nahuhulog sa `else`, nagiging **dilaw/"pending" na kulay** kahit tapos na talaga ang trabaho.
+- **Gagawin:** dagdagan ang timeline + status chip logic ng 3 bagong status, may sariling kulay/icon (match sa ginawa na natin sa admin: Resigned = sky blue, Terminated = rose, Contract Ended = amber).
+
+**R2. Bagong impormasyon na dapat makita sa Application Detail (wala pa ngayon)**
+
+- **Last working day** (planned) — kung Resigned/Terminated
+- **Return-to-work notice** (AWOL step 1) — kung may ongoing na AWOL process, dapat alam ng applicant na kailangan silang tumugon
+- **Exit checklist progress** — "3 of 5 items verified" — ngayon, admin-side (`RequirementsPanel`/`ExitChecklistPanel`) lang makikita ito, walang katapat sa app
+- **Contract dates** (Contractual jobs) — start/end, hindi pa ipinapakita kahit meron nang `contract_start_date`/`contract_end_date` sa backend
+
+**R3. Resume upload — hindi na-populate ang Work Experience at About Me**
+
+- `ResumeRepository.kt` → `parseResumeLocally()` (linya 78-95): ina-extract lang ang **name, email, phone, skills, resumeText** — HINDI ang `workExperiences` o `about`/`headline`.
+- May existing na UI hook na (`ResumeUploadFragment.kt` linya 150, `tvParsedExperience`) na umaasang may laman ang parsed work experience — **laging blangko ito ngayon** dahil hindi naman talaga pinupunan ng parser.
+- Manual-entry lang ang Work Experience/About ngayon (`EditProfileFragment.kt` + `AddExperienceBottomSheet.kt`) — gumagana naman, pero walang auto-fill mula sa resume.
+- **Gagawin:** palawakin ang `parseResumeLocally()` (o bagong function) para mag-extract ng mga timeline/company/role patterns mula sa resume text papunta sa `WorkExperience` entries, at gumawa ng simpleng "about me" summary mula sa resume (hal. unang 1-2 pangungusap pagkatapos ng header, o AI-generated summary kung available). **Hindi kailangang perpekto** — pwedeng i-prefill lang bilang starting point, papayagan pa rin ang manual edit (existing na ang UI para dito).
+- **Numero (phone)** — tama na ito, walang babaguhin (kumpirmado ng user).
+
+**R4. Profile-level document upload — kulang pa, dalawang magkaibang sistema pala**
+
+- **MERON NA** (`ApplicationDetailFragment.kt` linya 271-334, `RecruitmentRepository.kt`): per-application na checklist, lumalabas lang **pagka-Hired**, galing sa `pre_employment_requirements` table — ito 'yung katapat ng admin's `RequirementsPanel.tsx`. **Gumagana na ito.**
+- **WALANG** katapat pa ang Sprint 7 admin-side na **profile-level** na documents (`applicant_documents` table, Valid ID, optional, kahit kailan pwedeng i-upload) — walang reference dito kahit saan sa Kotlin code. Ito mismo ang "requirements, wala pa pag-aauploadan sa app" na sinabi mo.
+- **Gagawin:** bagong seksyon sa Profile screen (hindi naka-tali sa isang application) — upload ng Valid ID + mga requirement, optional, laging bukas — kumokonekta sa `applicant_documents` table na ginawa na natin sa admin side.
+- **Status: Tapos na ang code + na-verify (2026-10-13).** Walang bagong migration na kailangan (existing na ang `applicant_documents` table/`applicant-documents` bucket mula Sprint 7). `data/repository/ApplicantDocumentsRepository.kt`, `item_applicant_document.xml`, `fragment_my_documents.xml`, `ui/profile/MyDocumentsFragment.kt`, bagong "My Documents" row sa `fragment_profile.xml`/`ProfileFragment.kt`, `nav_graph.xml`. Gradle build successful.
+- **Bug na nahanap at na-ayos (2026-10-13):** hindi dapat kasama ang "Signed Employment Contract" sa profile-level list — walang contract na pipirmahan hangga't hindi pa Hired ang applicant. Tinanggal sa `PROFILE_DOCUMENTS` (`lib/pipeline.ts`) at sa Android `DOCUMENT_NAMES` — nananatili lang sa post-hire checklist (`PRE_EMPLOYMENT_REQUIREMENTS`) kung saan talaga siya dapat.
+
+**Pagkakasunod-sunod na mungkahi:** R1 muna (mabilis, ayusin ang mali/misleading na display), tapos R2 (bagong info sa detail screen — umaasa sa R1), tapos R4 (bagong upload screen, hiwalay na gawain), tapos R3 (resume parsing, pinaka-komplikado dahil kailangan ng text-extraction logic).
+
+**R5. Digital signature para sa "Signed Employment Contract" (desisyon 2026-10-13) — tapos na, build successful**
+
+Kapalit ng "i-print → pisikal na pirmahan → kunan ng litrato → i-upload" — pumirma na diretso sa phone gamit ang daliri.
+
+- Bagong `ui/widget/SignaturePadView.kt` — custom View, hand-rolled `Canvas`+`Path` (walang external library, parehong approach sa research natin para sa web/canvas signature), nag-e-export ng PNG
+- `RecruitmentRepository.kt` — bagong `uploadRequirementSignature()`, parehong bucket/path/DB-update convention ng existing `uploadRequirement()`, kaya **walang bagong migration o admin-side na pagbabago kailangan**
+- Bagong `ui/applications/SignContractFragment.kt` — scroll-to-read ang kontrata text bago mag-unlock ang signature pad ("I agree" pattern, parehong desisyon sa Branch Manager's countersignature sa Seksyon P)
+- Sa `ApplicationDetailFragment.kt`'s checklist: kapag ang item ay **"Signed Employment Contract"** mismo, "Sign" button na ang lalabas sa halip na "Upload" — bubuksan ang bagong screen sa halip na file picker
+- Gradle build successful, pero **hindi pa na-test sa totoong device/emulator**
 
 ### J. Seguridad at audit
 - Password hashing, limit sa maling login, session na mapapawalang-bisa.
