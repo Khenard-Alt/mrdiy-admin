@@ -19,6 +19,13 @@ type Interview = {
   applicantName: string | null;
 };
 
+type ReadyApplicant = {
+  applicationId: string;
+  jobTitle: string | null;
+  applicantName: string | null;
+  shortlistedAt: string | null;
+};
+
 const RESPONSE_STYLE: Record<Interview["applicantResponse"], string> = {
   Pending: "border-yellow-200 bg-yellow-50 text-yellow-700",
   Confirmed: "border-green-200 bg-green-50 text-green-700",
@@ -64,6 +71,7 @@ export default function InterviewCalendarPage() {
   const [selectedDate, setSelectedDate] = useState(ymd(today));
 
   const [interviews, setInterviews] = useState<Interview[]>([]);
+  const [readyToInterview, setReadyToInterview] = useState<ReadyApplicant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -94,6 +102,7 @@ export default function InterviewCalendarPage() {
         const data = await response.json();
         if (!cancelled) {
           setInterviews(data.interviews ?? []);
+          setReadyToInterview(data.readyToInterview ?? []);
         }
       } catch (err) {
         if (!cancelled) {
@@ -294,7 +303,7 @@ export default function InterviewCalendarPage() {
                   {selectedInterviews.map((interview) => (
                     <li key={interview.id}>
                       <Link
-                        href="/applications"
+                        href={`/applications?open=${encodeURIComponent(interview.applicationId)}`}
                         className="block px-5 py-4 transition hover:bg-slate-50"
                       >
                         <p className="text-sm font-semibold text-slate-800">
@@ -320,6 +329,50 @@ export default function InterviewCalendarPage() {
               )}
             </section>
           </div>
+
+          {/* READY TO INTERVIEW — shortlisted, not yet scheduled */}
+          <section className="mt-6 border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h2 className="text-lg font-bold text-slate-900">Ready to Interview</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Shortlisted applicants with no interview scheduled yet. Click one to set a date, time and venue.
+              </p>
+            </div>
+
+            {readyToInterview.length === 0 ? (
+              <div className="px-5 py-10 text-center text-sm text-slate-500">
+                No one is waiting to be scheduled right now.
+              </div>
+            ) : (
+              <ul className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-3">
+                {readyToInterview.map((applicant) => (
+                  <li key={applicant.applicationId} className="bg-white">
+                    <Link
+                      href={`/applications?open=${encodeURIComponent(applicant.applicationId)}`}
+                      className="block px-5 py-4 transition hover:bg-slate-50"
+                    >
+                      <p className="text-sm font-semibold text-slate-800">
+                        {applicant.applicantName || "Applicant"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">{applicant.jobTitle || "—"}</p>
+                      {applicant.shortlistedAt && (
+                        <p className="mt-2 text-[11px] text-slate-400">
+                          Shortlisted{" "}
+                          {new Date(applicant.shortlistedAt).toLocaleDateString("en-PH", {
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </p>
+                      )}
+                      <span className="mt-2 inline-flex w-fit border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+                        Schedule interview →
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
       </div>
     </main>

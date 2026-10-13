@@ -47,9 +47,28 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  // Shortlisted means not yet scheduled — scheduling an interview flips the
+  // application to "Interview Scheduled" (app/api/interviews/route.ts), and
+  // cancelling one flips it back to Shortlisted. So this is exactly the
+  // "ready to interview, not booked yet" queue, no extra join needed.
+  let readyQuery = supabase
+    .from("applications")
+    .select("id, user_id, job_id, branch_id, updated_at")
+    .eq("status", "Shortlisted")
+    .order("updated_at", { ascending: true });
+
+  if (session.role === "branch_manager") {
+    readyQuery = session.branchId
+      ? readyQuery.eq("branch_id", session.branchId)
+      : readyQuery.eq("branch_id", "");
+  }
+
+  const { data: readyRows } = await readyQuery;
+  const ready = readyRows ?? [];
+
   const interviews = rows ?? [];
-  const jobIds = [...new Set(interviews.map((i) => i.job_id).filter(Boolean))];
-  const userIds = [...new Set(interviews.map((i) => i.user_id).filter(Boolean))];
+  const jobIds = [...new Set([...interviews.map((i) => i.job_id), ...ready.map((r) => r.job_id)].filter(Boolean))];
+  const userIds = [...new Set([...interviews.map((i) => i.user_id), ...ready.map((r) => r.user_id)].filter(Boolean))];
 
   const [jobsResult, profilesResult] = await Promise.all([
     jobIds.length > 0
@@ -75,6 +94,12 @@ export async function GET(request: NextRequest) {
       applicantResponse: i.applicant_response,
       jobTitle: jobMap.get(i.job_id) ?? null,
       applicantName: profileMap.get(i.user_id) ?? null,
+    })),
+    readyToInterview: ready.map((r) => ({
+      applicationId: r.id,
+      jobTitle: jobMap.get(r.job_id) ?? null,
+      applicantName: profileMap.get(r.user_id) ?? null,
+      shortlistedAt: r.updated_at,
     })),
   });
 }

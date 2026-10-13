@@ -316,6 +316,29 @@ Kapalit ng "i-print → pisikal na pirmahan → kunan ng litrato → i-upload" �
 - **Gagawin / tapos na:** `ProfileRepository.kt` → bagong `backfillResumeTextIfMissing()`, tinatawag sa loob ng `loadProfile()`. Kapag may `resume_url` pero blangko ang `resume_text`, i-da-download ulit ang file mula sa storage, i-re-extract ang text (`ResumeRepository.extractText`), i-parse ang skills (bagong `parseResumeUnchecked()` — kapareho ng `parseResume()` pero walang validity check, dahil tanggap na ang file noong una itong na-upload), at i-save pabalik sa `profiles.resume_text`/`skills` gamit ang existing na `persistResume()`. Lazy/on-read pattern — tatakbo lang minsan bawat account, wala nang gagawin pag may laman na ang `resume_text`.
 - Gradle build successful. Hindi pa na-verify live kay Viviene (kailangan mag-reload ng Profile/Jobs sa kanyang account sa app).
 
+**R7. I-disable ang "Apply" kapag may active employment na (desisyon 2026-10-14)**
+
+- Dati: ang tanging check bago mag-apply ay duplicate application sa parehong job (`user_id` + `job_id`). Pwede pa ring mag-apply sa ibang job ang isang applicant kahit **Hired** na siya sa ibang posisyon — walang block.
+- Walang auto-close/trigger na nagpapalit ng status papuntang "Contract Ended" kapag lumagpas ang `contract_end_date` (manual pa rin ang pagpalit ng HR) — kaya ang **status na "Hired"** mismo ang ginamit bilang senyales na "nasa loob pa ng trabaho/kontrata," hanggang hindi pa ito binabago ng HR papuntang Resigned/Terminated/Contract Ended.
+- **Gagawin / tapos na:**
+  - `ApplicationsRepository.kt` — bagong `hasActiveEmployment()`: true kung may application ang user na may status na "Hired" (anumang job).
+  - `JobDetailFragment.kt` — bagong `checkIfAlreadyEmployed()`, tinatawag pagka-load ng job detail: kapag true, dinidisable ang **Apply** button at pinapalitan ang text ng "Already employed" (parehong pattern sa existing na "Fully booked" check).
+  - `applyOnce()` (`ApplicationsRepository.kt`) — dinagdagan din ng parehong check bilang **server-side guard** (defense in depth), hindi lang UI — kung sakaling ma-bypass ang disabled button.
+  - Dating generic na "Application failed. Please try again." na error toast — pinalitan para ipakita na ang totoong error message (hal. "You are already employed and cannot apply for another job right now."), hindi na laging generic.
+- Gradle build successful. Hindi pa na-verify live.
+
+### S. Admin web bug — paulit-ulit na nagde-download ang resume (nahanap at na-ayos 2026-10-14)
+
+- **Sintomas:** sa Applications modal, pag-click ng kahit anong button na nag-a-update ng application (status, tags, hand-off, atbp.), paulit-ulit na "nagde-download" ang resume ng applicant kahit hindi yun ang pinindot.
+- **Sanhi:** ang `applications` page ay naka-subscribe sa realtime changes (`useRealtimeRefresh`) — kaya bawat pag-update ng row (status change man lang) ay nagti-trigger ng buong `loadApplications()` ulit. Bawat tawag sa `/api/applications`, gumagawa ito ng **bagong signed URL** (`createSignedUrls`) para sa resume file — ibang token kada tawag kahit parehong file. Ang bagong URL string na 'yon ay pumapasok sa `<iframe src>` na nagpapakita ng PDF preview sa modal — pag nagbago ang `src`, nire-reload ng browser ang iframe, at kung naka-set ang browser (hal. Brave) na "i-download ang PDF sa halip na i-preview," bawat reload = bagong download.
+- **Unang fix (hindi sapat):** `app/api/applications/route.ts` — module-level cache (`signedUrlCache`) para i-reuse ang signed URL per storage path. **Hindi gumana** — base sa patuloy na pag-trigger, mukhang hindi nananatili ang module-level state sa pagitan ng mga request sa dev server (per-request isolation).
+- **Ikalawang fix:** `app/applications/page.tsx` — client-side na pag-pin ng resume URL sa halip na umasa sa server cache (bagong `resumeUrlCache` state, una lang na-se-save ang URL per application, hindi na papalitan sa susunod na fetch). Naka-tulong ito sa dev-server caching issue, pero may natitira pang separate na bug.
+- **Ikatlong fix — ang totoong ugat:** hindi pala PDF ang resume ng ilang applicant (hal. `.docx`) — **walang built-in Word viewer ang browser**, kaya kapag inilagay ang `.docx` URL sa isang `<iframe>`, blangkong kahon lang ang lumalabas (o sumusubok mag-download imbes na mag-preview), kahit anong ayusin sa caching. Ito rin pala ang talagang dahilan ng paulit-ulit na "resume-xxxx" tab na bumubukas — hindi preview, download attempt talaga.
+  - Bagong `isPdfResume()` helper sa `page.tsx` — tinitingnan ang extension ng signed URL (`.pdf` bago ang `?token=`).
+  - Pag `.pdf`, ganun pa rin — lumalabas ang `<iframe>` preview.
+  - Pag hindi `.pdf` (hal. `.docx`), **hindi na gagawa ng blangkong iframe** — sa halip, lalabas ang malinaw na paalala: "Preview not available for this file type... use Open Full Resume or Download Resume instead."
+- Build successful.
+
 ### J. Seguridad at audit
 - Password hashing, limit sa maling login, session na mapapawalang-bisa.
 - **Audit log:** lahat ng mahalagang aksyon (status, hand-off, delete, account).

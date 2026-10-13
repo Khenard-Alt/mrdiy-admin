@@ -181,6 +181,23 @@ export default function ApplicationsPage() {
 
   useRealtimeRefresh(["applications"], loadApplications);
 
+  // Deep link from elsewhere (e.g. the Interview Calendar's "ready to
+  // interview" queue): /applications?open=<id> opens that application's
+  // modal once it's loaded, then cleans the URL so a refresh doesn't reopen it.
+  const [didOpenFromLink, setDidOpenFromLink] = useState(false);
+  useEffect(() => {
+    if (didOpenFromLink || applications.length === 0) return;
+    const openId = new URLSearchParams(window.location.search).get("open");
+    if (!openId) return;
+    const match = applications.find((item) => item.id === openId);
+    if (match) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedApplication(match);
+    }
+    setDidOpenFromLink(true);
+    window.history.replaceState(null, "", "/applications");
+  }, [applications, didOpenFromLink]);
+
   // Keep the open modal in sync whenever the list reloads (manual refresh,
   // realtime signal, or a hand-off/transfer-offer action elsewhere).
   useEffect(() => {
@@ -195,12 +212,53 @@ export default function ApplicationsPage() {
   // RESUME URL
   // ============================================================
 
+  // Pins the first signed URL seen per application, so the resume preview
+  // <iframe> keeps a stable src across realtime-triggered reloads. Every
+  // /api/applications fetch mints a fresh signed-url token for the same
+  // file; without pinning, each refresh (triggered by any unrelated status
+  // change, tag edit, hand-off...) changed the iframe's src, reloading it —
+  // which browsers set to download PDFs instead of previewing them turned
+  // into a repeated, unwanted download. A pinned URL stays valid for the
+  // signed URL's full hour, which easily covers one review session.
+  // Filled in an effect (never during render, which must stay pure) and
+  // only read in getResumeUrl.
+  const [resumeUrlCache, setResumeUrlCache] = useState<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setResumeUrlCache((previous) => {
+      let changed = false;
+      const next = new Map(previous);
+      for (const application of applications) {
+        const live = application.resume_url || application.profile?.resume_url || null;
+        if (live && !next.has(application.id)) {
+          next.set(application.id, live);
+          changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [applications]);
+
   function getResumeUrl(
     application: ApplicationRow
   ) {
     // The /api/applications response already resolves stored paths to
     // signed URLs server-side (the "resumes" bucket is private).
-    return application.resume_url || application.profile?.resume_url || null;
+    const live = application.resume_url || application.profile?.resume_url || null;
+    return resumeUrlCache.get(application.id) ?? live;
+  }
+
+  /**
+   * Browsers can preview a PDF inline (native viewer), but have no built-in
+   * renderer for .docx/.doc — an <iframe> pointed at one just shows blank, or
+   * the browser falls back to trying to download it. Only PDFs get the
+   * inline <iframe> preview; anything else gets Open/Download plus a note.
+   */
+  function isPdfResume(application: ApplicationRow) {
+    const url = getResumeUrl(application);
+    if (!url) return false;
+    return url.split("?")[0].toLowerCase().endsWith(".pdf");
   }
 
   // ============================================================
@@ -1124,7 +1182,7 @@ export default function ApplicationsPage() {
 
                 {getResumeUrl(
                   selectedApplication
-                ) ? (
+                ) && isPdfResume(selectedApplication) ? (
                   <div className="mt-6 overflow-hidden border border-slate-300 bg-slate-100">
                     <iframe
                       src={
@@ -1135,6 +1193,19 @@ export default function ApplicationsPage() {
                       title="Applicant Resume"
                       className="h-[700px] w-full"
                     />
+                  </div>
+                ) : getResumeUrl(selectedApplication) ? (
+                  <div className="mt-6 border border-dashed border-slate-300 bg-slate-50 px-6 py-20 text-center">
+                    <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-slate-200 text-3xl">
+                      📝
+                    </div>
+                    <h3 className="mt-4 text-sm font-bold text-slate-700">
+                      Preview not available for this file type
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      This resume is a Word document (.docx) — browsers can&apos;t preview it inline. Use{" "}
+                      <strong>Open Full Resume</strong> or <strong>Download Resume</strong> above instead.
+                    </p>
                   </div>
                 ) : (
                   <div className="mt-6 border border-dashed border-slate-300 bg-slate-50 px-6 py-20 text-center">

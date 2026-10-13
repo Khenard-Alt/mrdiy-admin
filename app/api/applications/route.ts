@@ -10,6 +10,11 @@ import {
 } from "@/lib/pipeline";
 import { sendApplicantEmail, type EmailKind, type EmailResult } from "@/lib/email";
 
+// Signed URLs are valid for 1 hour; cache for less than that so a refresh
+// still gets a fresh URL well before the old one would actually expire.
+const SIGNED_URL_CACHE_MS = 50 * 60 * 1000;
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+
 export async function GET(request: NextRequest) {
   const session = requireAdminSession(request);
   if (!session) {
@@ -96,19 +101,40 @@ export async function GET(request: NextRequest) {
     ),
   ];
 
-  const signedUrlMap = new Map<string, string>();
+  // Reuse a cached signed URL per path instead of minting a new one on every
+  // call. This endpoint is re-fetched on every realtime change to the
+  // applications table (any status update, tag, hand-off...), and a brand
+  // new URL each time changed the resume preview <iframe>'s src, reloading
+  // it — which some browsers (set to download PDFs instead of previewing
+  // them) turned into a repeated, unwanted download on every unrelated
+  // action. A stable URL within the cache window keeps the iframe untouched.
+  const now = Date.now();
+  for (const [path, entry] of signedUrlCache) {
+    if (entry.expiresAt <= now) signedUrlCache.delete(path);
+  }
 
-  if (resumePaths.length > 0) {
+  const uncachedPaths = resumePaths.filter((path) => !signedUrlCache.has(path));
+
+  if (uncachedPaths.length > 0) {
     const { data: signedUrls } = await supabase.storage
       .from("resumes")
-      .createSignedUrls(resumePaths, 60 * 60);
+      .createSignedUrls(uncachedPaths, 60 * 60);
 
     (signedUrls ?? []).forEach((entry) => {
       if (entry.signedUrl && entry.path) {
-        signedUrlMap.set(entry.path, entry.signedUrl);
+        signedUrlCache.set(entry.path, {
+          url: entry.signedUrl,
+          expiresAt: now + SIGNED_URL_CACHE_MS,
+        });
       }
     });
   }
+
+  const signedUrlMap = new Map(
+    resumePaths
+      .filter((path) => signedUrlCache.has(path))
+      .map((path) => [path, signedUrlCache.get(path)!.url])
+  );
 
   function resolveResumeUrl(path: string | null) {
     if (!path) return null;
