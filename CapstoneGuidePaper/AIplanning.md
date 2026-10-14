@@ -274,7 +274,16 @@ Resulta: "Resume" o "Hindi resume," may confidence %, at label kung saan
 
 **Bakit walang live Python sa production:** training lang ang gamit ng Python (offline, Colab/notebook) — hindi ito tumatakbo sa totoong sistema. Pagkatapos ng training, ang simpleng linear model (weights + TF-IDF vocabulary) ay madaling isalin sa TypeScript function — walang kailangang i-deploy, i-host, o i-maintain na hiwalay na Python microservice. Mas kaunting babantayan, mas simple ang arkitektura.
 
-**Ikukumpara:** luma (rules) vs bago (trained model) sa parehong test set — accuracy, precision, recall, F1. Hiwalay na desisyon ito mula sa JD Generator; hindi pa nasisimulan.
+**Ikukumpara:** luma (rules) vs bago (trained model) sa parehong test set — accuracy, precision, recall, F1. Hiwalay na desisyon ito mula sa JD Generator.
+
+**Pagkakasunod-sunod (binago 2026-10-15 — inihanda na ang files/libs, pero ang dataset mismo ay sa dulo pa, kasunod ng research):**
+
+| Hakbang | Gagawin | Status |
+|---|---|---|
+| A | I-ready ang training scaffold: folder, `requirements.txt`, script skeleton na may placeholder para sa data | ✅ Tapos na — `CapstoneGuidePaper/resume-validator-training/` (`requirements.txt`, `train_resume_validator.py`), na-verify: `pip install` + script run nang walang data, gumana ang empty-data guard |
+| B | I-research at i-curate ang dataset (checklist sa ibaba — dedupe, balance, atbp.) | Hindi pa nasisimulan — hiwalay na gawain, kailangan ng oras |
+| C | I-seed ang aktwal na dataset file (`dataset.csv`) — **SA DULO, HINDI MUNA**, kasunod lang ng B | Naghihintay sa B |
+| D | Patakbuhin ang script: clean → split → train 3 model → ikumpara → i-export ang pinakamagaling | Naghihintay sa C |
 
 **Checklist — mga dapat iwasan sa training data (desisyon 2026-10-15)**
 
