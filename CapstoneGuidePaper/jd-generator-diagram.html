@@ -242,7 +242,73 @@
     </tbody>
   </table>
 
+  <h2>Resume Validator — Python training stack</h2>
+  <p class="section-note">Offline/training-only (§5.6) — none of this runs in the live system. Training happens once, on a computer, before the app ships; the live app only ever reads the small JSON file it exports.</p>
+  <table>
+    <thead>
+      <tr><th>Library</th><th>What it's for</th><th>Why it's needed</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>pandas</code></td>
+        <td class="cell-desc">Reading and shaping the dataset (CSV → table)</td>
+        <td class="cell-desc">Loads <code>text,label</code> rows, powers the duplicate/class-balance checks in §5.6's data-quality checklist</td>
+      </tr>
+      <tr>
+        <td><code>scikit-learn</code></td>
+        <td class="cell-desc">The actual ML library — <code>TfidfVectorizer</code>, <code>LogisticRegression</code>, <code>MultinomialNB</code>, <code>LinearSVC</code>, <code>train_test_split</code>, evaluation metrics</td>
+        <td class="cell-desc">This is where the model actually learns — turns resume text into vectors, trains three candidate classifiers, compares them</td>
+      </tr>
+      <tr>
+        <td><code>numpy</code></td>
+        <td class="cell-desc">Numerical arrays/matrices</td>
+        <td class="cell-desc">scikit-learn's own dependency — underlies every TF-IDF vector and model weight</td>
+      </tr>
+      <tr>
+        <td><code>jupyter</code></td>
+        <td class="cell-desc">Interactive notebook cells</td>
+        <td class="cell-desc">Lets <code>train_resume_validator.py</code>'s <code>#&nbsp;%%</code> cells run one at a time in VS Code instead of all at once</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3 style="font-family:var(--serif);font-weight:600;font-size:16px;margin:28px 0 4px;">"What's PyTorch for?" — it isn't used, on purpose</h3>
+  <p class="section-note">No PyTorch or TensorFlow anywhere in this project. Not an oversight — deep learning is the wrong tool for a yes/no text classifier this small.</p>
+  <table>
+    <thead>
+      <tr><th></th><th>PyTorch / TensorFlow (deep learning)</th><th>scikit-learn (classical ML) — what we used</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="cell-desc"><b>Built for</b></td>
+        <td class="cell-desc">Neural networks, large datasets, complex tasks (images, audio, deep language understanding)</td>
+        <td class="cell-desc">Simple binary classification (resume or not) — exactly this task</td>
+      </tr>
+      <tr>
+        <td class="cell-desc"><b>Dataset size needed</b></td>
+        <td class="cell-desc">Thousands to millions of examples to avoid overfitting</td>
+        <td class="cell-desc">Hundreds to thousands is plenty — matches our actual dataset size</td>
+      </tr>
+      <tr>
+        <td class="cell-desc"><b>Training speed</b></td>
+        <td class="cell-desc">Minutes to hours, often needs a GPU</td>
+        <td class="cell-desc">Seconds to a couple minutes, an ordinary CPU is enough</td>
+      </tr>
+      <tr>
+        <td class="cell-desc"><b>Explainability</b></td>
+        <td class="cell-desc">Hard to say why it decided what it decided — a "black box"</td>
+        <td class="cell-desc">Every word's weight is directly visible — fits the Explainable AI theme running through this whole project (§3, §5.7B)</td>
+      </tr>
+      <tr>
+        <td class="cell-desc"><b>Shipping to production</b></td>
+        <td class="cell-desc">Needs ONNX runtime, TensorFlow.js, or similar — a new dependency in the Next.js/Android app</td>
+        <td class="cell-desc">A Logistic Regression model is just numbers (weights + vocabulary) — reimplemented directly in TypeScript, no new library needed</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="section-note" style="margin-top:-8px;">In short: PyTorch/TensorFlow would be a tractor for a task the size of planting one seedling. scikit-learn is faster, easier to explain, and deploys without dragging in a new dependency.</p>
+
   <footer>
-    Full research and decision log: <code>CapstoneGuidePaper/AIplanning.md</code> §5, §5.8. Working checklist: <code>CapstoneGuidePaper/jdGenerator.md</code>.
+    Full research and decision log: <code>CapstoneGuidePaper/AIplanning.md</code> §5, §5.6, §5.8. Working checklist: <code>CapstoneGuidePaper/jdGenerator.md</code>. Full library reference: <code>CapstoneGuidePaper/resume-validator-training/README.md</code>.
   </footer>
 </div>

@@ -6,11 +6,11 @@ This document provides a comprehensive engineering blueprint for advanced AI/ML 
 
 ## Architecture Overview
 
-Status legend: ✅ tapos na (Section 1-3) · 🔵 PLANO PA LANG, may phases na (Section 5, 5.6) · ⚪ idea pa lang, walang code (Section 6.1-6.3) · ⚠️ superseded (Section 4)
+Status legend: ✅ done (Section 1-3) · 🔵 PLANNED, has phases (Section 5, 5.6) · ⚪ idea only, no code (Section 6.1-6.3) · ⚠️ superseded (Section 4)
 
 ```mermaid
 graph LR
-    subgraph "APPLICANT AI/ML MODULES — ✅ TAPOS NA (§1-3)"
+    subgraph "APPLICANT AI/ML MODULES — ✅ DONE (§1-3)"
         A[Resume Text Extractor<br/>PdfBox-Android] --> B[Multi-Factor Resume Validator<br/>Headers + Contact + Timeline + Skills]
         B --> C[Skill Density Extractor<br/>ResumeSkills Regex Vocabulary]
         C --> D[Profile Skill Auto-Merge]
@@ -20,20 +20,20 @@ graph LR
         F --> Z2[Strengths/Weaknesses Diagnostic<br/>§2.2]
     end
 
-    subgraph "ADMIN RECRUITMENT AI — 🔵 PLANO PA LANG (§5)"
-        G[Layer 1: TF-IDF Retrieval<br/>sariling job corpus] --> H[Layer 2: Compliance Rules<br/>+ draft/warnings]
-        H -->|cold start, walang kahawig| GM[Layer 3: Gemini<br/>cold-start handler]
-        H -->|may sapat na kahawig| PUB[Jobs page]
-        GM --> H2[Layer 2 ulit: Guardrail] --> PUB
+    subgraph "ADMIN RECRUITMENT AI — 🔵 PLANNED (§5)"
+        G[Layer 1: TF-IDF Retrieval<br/>own job corpus] --> H[Layer 2: Compliance Rules<br/>+ draft/warnings]
+        H -->|cold start, no match| GM[Layer 3: Gemini<br/>cold-start handler]
+        H -->|sufficient match| PUB[Jobs page]
+        GM --> H2[Layer 2 again: Guardrail] --> PUB
     end
 
-    subgraph "RESUME VALIDATOR v2 — 🔵 PLANO PA LANG (§5.6)"
-        RV[Trained classifier<br/>Logistic Regression/NB + TF-IDF] -->|mababang confidence| RVG[Gemini fallback]
-        RV -->|sigurado| RVR[Resume / Hindi resume]
+    subgraph "RESUME VALIDATOR v2 — 🔵 PLANNED (§5.6)"
+        RV[Trained classifier<br/>Logistic Regression/NB + TF-IDF] -->|low confidence| RVG[Gemini fallback]
+        RV -->|confident| RVR[Resume / Not a resume]
         RVG --> RVR
     end
 
-    subgraph "FUTURE DIRECTIONS — ⚪ IDEA PA LANG (§6)"
+    subgraph "FUTURE DIRECTIONS — ⚪ IDEA ONLY (§6)"
         PM[Proactive re-matching<br/>§6.1] -.-> E
         DV[Document verification AI<br/>§6.2] -.-> GM
         FAQ[Conversational FAQ assistant<br/>§6.3] -.-> GM
@@ -104,7 +104,7 @@ $$\text{Estimated Days} = \text{Base Timeline (7 Days)} + \Delta_{\text{Match}} 
 ### 2.2 Strengths and Weaknesses ML Diagnostic Engine
 Class Name: `CandidateDiagnosticEngine.kt`
 
-#### A. Strengths (Mga Kasanayan at Bentahe):
+#### A. Strengths
 - Core Skill Matches: Matches between candidate skills and job requirements.
 - Experience Fit: Candidate years of experience vs required level.
 - Geographic Fit: Lives within Metro Manila branch boundary (`LocationDistance.kt`).
@@ -113,7 +113,7 @@ Class Name: `CandidateDiagnosticEngine.kt`
   - `[+]` *"High TF-IDF similarity in Store Management & Inventory Auditing"*
   - `[+]` *"Location match: Pasig City (Branch Proximity ~4.2 km)"*
 
-#### B. Weaknesses / Skill Gaps (Mga Kulang na Kasanayan):
+#### B. Weaknesses / Skill Gaps
 - Missing Core Skills: Key requirements listed in job description missing from candidate profile.
 - Missing Certifications: e.g., Forklift license, First Aid certification.
 - Example Outputs:
@@ -129,7 +129,21 @@ Provide transparent, human-readable explanations detailing WHY a candidate was r
 
 ### 3.2 Mathematical Model (TF-IDF & Cosine Similarity)
 
-Term Frequency - Inverse Document Frequency (TF-IDF):
+**What TF-IDF actually means — not just the acronym, but what it really stands for:**
+
+**TF-IDF** stands for **Term Frequency – Inverse Document Frequency**. It has two parts, each with its own job:
+
+- **Term Frequency (TF)** — "how often this word appears IN ONE document." For example, if the word "cashier" appears 10 times in a 200-word resume, its TF is high there. **Intuition:** if a resume mentions a word often, it's likely important to that person.
+
+- **Inverse Document Frequency (IDF)** — "how rare this word is ACROSS ALL documents" (across the whole collection/corpus — all job postings or resumes). This is the opposite: if a word appears in ALMOST ALL documents (e.g. "the," "and," "experience"), its IDF is **low** — it's just a common word, meaningless as a "distinguishing trait." But if it rarely appears (e.g. "forklift" or "cashiering"), its IDF is **high** — meaning it's an important word for telling this document apart from others. **Intuition:** a rare word = a better "fingerprint" for identifying a document.
+
+- **TF-IDF = TF × IDF** — combines both: a word scores high if it **appears often in ONE document, BUT is rare across ALL the others.** This is how the system finds which words truly "represent" a resume or job posting, instead of just counting words.
+
+**A concrete example:** in a resume, the word "the" might appear 20 times (high TF) but it also appears in ALL other resumes (low IDF) — so its final TF-IDF score stays low, it's not treated as an "important word." Meanwhile, the word "forklift" might appear only 2 times (lower TF than "the") but only a FEW resumes contain this word (high IDF) — so its final TF-IDF is higher, making it more "meaningful" for identifying that person's actual specialty.
+
+Once each word's TF-IDF score is computed, the whole document (resume or job) is converted into a "vector" (a list of numbers, one number per word in the vocabulary) — this is where **Cosine Similarity** comes in, which measures how "aligned in direction" two vectors are (0% = no similarity, 100% = identical). This is used to determine how similar a resume is to a job posting, or how similar a new job title is to existing postings (Layer 1 of the JD Generator, §5).
+
+**Mathematical representation:**
 
 $$\text{TF}(t, d) = \frac{f_{t,d}}{\sum_{t' \in d} f_{t',d}}$$
 
@@ -148,7 +162,7 @@ $$\text{Cosine Similarity}(\vec{A}, \vec{B}) = \frac{\vec{A} \cdot \vec{B}}{\|\v
 
 ## Section 4: AI Job Description Generator for Admin Web Portal — ⚠️ SUPERSEDED, see Section 5
 
-Ang ideya dito (template-based lang, walang ML) ay **pinalitan ng Layered AI Job Description Generator sa Section 5**, na may sariling TF-IDF retrieval + rules bilang core, at Gemini bilang cold-start handler. Iniiwan lang ito dito bilang record ng orihinal na mungkahi.
+This idea (template-based only, no ML) was **replaced by the Layered AI Job Description Generator in Section 5**, which has its own TF-IDF retrieval + rules as the core, with Gemini as the cold-start handler. Left here only as a record of the original proposal.
 
 ### 4.1 Objective
 Assist HR Administrators when creating or editing job postings in the Admin Web Portal (`mrdiy-admin`) by automatically generating optimized, retail-ready job descriptions based on the specified job title.
@@ -164,182 +178,191 @@ Assist HR Administrators when creating or editing job postings in the Admin Web 
 
 ---
 
-## Section 5: Layered AI Job Description Generator — PLANO PA LANG (2026-10-14)
+## Section 5: Layered AI Job Description Generator — PLANNED (2026-10-14)
 
-Pinapalitan nito ang paraan sa Section 4 (template-based, walang ML).
+This replaces the approach in Section 4 (template-based, no ML).
 
-**Loose end na in-ayos (2026-10-15):** una naming naisip na gawing trained classifier ito gamit ang 24-category na Kaggle resume dataset (HR, Sales, IT, Aviation, Advocate, Agriculture...). **Tinanggal ang ideyang 'yon** — lumabas ito sa scope, dahil karamihan sa 24 categories ay walang kinalaman sa mga totoong posisyon ng MR.DIY (Cashier, Stock Clerk, Store Manager, atbp.). Ang Resume Validator (§5.6) na lang ang magiging trained-model feature, hindi ang JD Generator.
+**Loose end resolved (2026-10-15):** we initially considered making this a trained classifier using the 24-category Kaggle resume dataset (HR, Sales, IT, Aviation, Advocate, Agriculture...). **That idea was dropped** — it fell out of scope, since most of the 24 categories have nothing to do with MR.DIY's actual positions (Cashier, Stock Clerk, Store Manager, etc.). The Resume Validator (§5.6) is the trained-model feature now, not the JD Generator.
 
-### 5.1 Patakaran (capstone constraint)
+### 5.1 Rule (capstone constraint)
 
-- **Bawal ang "plain AI API lang."** Ang title ng study ay *"A Mobile-Based Recruitment System Using Machine Learning For Mr. D.I.Y."* Wala ang API sa title; suggestion lang ito. Kaya ang core ay dapat **sariling ML ng sistema**, at ang external AI API (Gemini) ay dagdag na layer lang sa ibabaw.
-- **Hindi "pampaganda lang" si Gemini (binago 2026-10-15).** Naunang desisyon: Gemini = "optional, pampakinis lang ng wording." Pero tama ang punto ng user: kung andun na lahat sa database (existing job postings), ano pa ba ang tunay na kontribusyon ng AI kung ginagamit lang ito sa karaniwang kaso? **Ang Layer 1 (TF-IDF retrieval) ay gumagana lang kung may kahawig na existing posting.** Kapag bagong klase ng trabaho na wala pang halimbawa sa database (cold start — hal. unang beses mag-post ng "IT Support Technician"), **walang mahahanap si Layer 1**, mahina o blangko ang output. Dito **mandatory** na tumawag kay Gemini — hindi na opsyonal, dahil wala nang ibang pagkukunan ng content. Kapag may 2+ magandang katulad na existing posting, Layer 1+2 na lang (walang Gemini, mabilis, libre).
-- **Pagsubok (binago):** hindi na "tatanggalin ang Gemini, dapat gumagana pa rin" — kundi "kapag may sapat na katulad na existing posting (hindi cold-start), dapat gumagana nang walang Gemini." Ang Gemini mismo ay hindi na basta matatanggal sa buong sistema, pero may malinaw na kondisyon kung kailan ito aktwal na kinakailangan.
-- **Walang bagong training na kailangan.** Ginagamit ang ML na nasa scope na: TF-IDF + cosine similarity (fitted sa sariling job corpus ng MR.DIY) at ang skill extraction vocabulary.
+- **"Just a plain AI API" is not allowed.** The study's title is *"A Mobile-Based Recruitment System Using Machine Learning For Mr. D.I.Y."* The title does not mention an API; it's only a suggestion. So the core must be **the system's own ML**, with the external AI API (Gemini) as an additional layer on top.
+- **Gemini is not "just for polish" (revised 2026-10-15).** Earlier decision: Gemini = "optional, just smooths out the wording." But the user's point was correct: if everything is already in the database (existing job postings), what is AI's real contribution if it's only used in the common case? **Layer 1 (TF-IDF retrieval) only works if there's a similar existing posting.** When it's a new kind of job with no example yet in the database (cold start — e.g. the first time posting "IT Support Technician"), **Layer 1 finds nothing**, producing a weak or blank output. That's where calling Gemini becomes **mandatory** — no longer optional, because there's no other source of content. When there are 2+ good matching existing postings, Layer 1+2 alone is enough (no Gemini, fast, free).
+- **Test (revised):** not "remove Gemini, it should still work" but rather "when there's a sufficiently similar existing posting (not cold-start), it should work without Gemini." Gemini itself cannot simply be removed from the whole system, but there's a clear condition for when it's actually needed.
+- **No new training required.** Uses ML already in scope: TF-IDF + cosine similarity (fitted on MR.DIY's own job corpus) and the skill extraction vocabulary.
 
-### 5.2 Mga layer
+### 5.2 Layers
 
 ```
 HR input: job title, category, level, branch, contract duration
         │
-Layer 1 — SARILING ML (core, gumagana kahit offline)
-        • TF-IDF + cosine (parehong engine ng matching, lib/matching.ts)
-          → hahanapin ang top-k na pinakakahawig na existing MR.DIY job
-            postings sa `jobs` table
-        • Bubuo ng draft mula sa responsibilities/requirements nila
-          (retrieval-based generation, hindi kopya ng isang posting lang)
-        • Skill extraction (ResumeSkills vocabulary) → mungkahing skills
+Layer 1 — OWN ML (core, works even offline)
+        • TF-IDF + cosine (same engine as matching, lib/matching.ts)
+          → finds the top-k most similar existing MR.DIY job
+            postings in the `jobs` table
+        • Builds a draft from their responsibilities/requirements
+          (retrieval-based generation, not a copy of a single posting)
+        • Skill extraction (ResumeSkills vocabulary) → suggested skills
         │
-Layer 2 — SARILING RULES (MR.DIY standard + compliance)
-        • Kumpletong sections: About the Role / Key Responsibilities /
+Layer 2 — OWN RULES (MR.DIY standard + compliance)
+        • Complete sections: About the Role / Key Responsibilities /
           Requirements / Benefits
         • Mandatory benefits (SSS, PhilHealth, Pag-IBIG), contract duration
-          kung Contractual, branch/location
-        • I-flag ang bawal na wording (hal. age limit — RA 10911, Anti-Age
+          if Contractual, branch/location
+        • Flags banned wording (e.g. age limit — RA 10911, Anti-Age
           Discrimination in Employment Act)
         │
-Layer 3 — Gemini (COLD-START HANDLER, mandatory kapag <2 kahawig na posting)
-        • Kondisyon: tatawagin lang kapag kulang/walang sapat na kahawig na
-          posting sa Layer 1 (mababa ang similarity score) — kapag may sapat,
-          hindi na ito tatawagin, Layer 1+2 na lang
-        • Input: ang draft mula sa Layer 1+2 (grounded sa job title/category/
-          level/compliance rules), hindi basta blangkong job title lang
-        • Bubuo ng bagong content kapag walang mahahawig na posting; kung may
-          Layer 1 draft, pinapakinis lang; bawal magdagdag ng bagong
-          sweldo, benefits, o requirements
-        • Walang key / walang internet / error → Layer 2's base template na
-          ang final (compliant pero generic, hindi retrieval-based)
+Layer 3 — Gemini (COLD-START HANDLER, mandatory when <2 similar postings)
+        • Condition: only called when Layer 1 lacks enough similar
+          postings (low similarity score) — when there are enough,
+          it is not called, Layer 1+2 alone is used
+        • Input: the draft from Layer 1+2 (grounded in job title/category/
+          level/compliance rules), not just a blank job title
+        • Generates new content when there's no similar posting; if a
+          Layer 1 draft exists, only polishes it; not allowed to add
+          new salary, benefits, or requirements
+        • No key / no internet / error → Layer 2's base template becomes
+          the final result (compliant but generic, not retrieval-based)
         │
-Layer 2 ulit — GUARDRAIL sa output ng Gemini
-        • Kumpleto pa ba ang sections? May naimbentong sweldo/benefits?
-          May bawal na wording? Kung bumagsak → ibabalik ang Layer 2 draft
+Layer 2 again — GUARDRAIL on Gemini's output
+        • Are the sections still complete? Any invented salary/benefits?
+          Any banned wording? If it fails → the Layer 2 draft is returned instead
         │
-Layer 4 — HR review at edit bago i-publish (laging tao ang huling magpapasya)
+Layer 4 — HR review and edit before publishing (a human always makes the final call)
 ```
 
-### 5.3 Ipapakita sa UI (Jobs page, admin)
+### 5.3 Shown in the UI (Jobs page, admin)
 
-- Button: **"✨ Generate description"** sa tabi ng Description field.
-- Pagkatapos mag-generate, makikita ng HR:
-  - ang draft (editable),
-  - **"Based on:"** listahan ng mga pinagkunang existing postings + similarity % kung may kahawig (explainable, parehong konsepto ng "Why this rank") — o **"No similar posting found — generated by Gemini"** kung cold-start,
-  - malinaw na label kung alin ang nangyari: **"Generated from existing postings"** (Layer 1+2 lang) / **"Written by Gemini — no similar role yet"** (cold-start) / **"Polished by Gemini"** (may katulad, pinakinis lang),
-  - mga warning ng Layer 2 (hal. "Age requirement detected — remove before publishing").
+- Button: **"✨ Generate description"** next to the Description field.
+- After generating, HR sees:
+  - the draft (editable),
+  - **"Based on:"** a list of the existing postings it drew from + similarity % if there's a match (explainable, same concept as "Why this rank") — or **"No similar posting found — generated by Gemini"** if cold-start,
+  - a clear label for what happened: **"Generated from existing postings"** (Layer 1+2 only) / **"Written by Gemini — no similar role yet"** (cold-start) / **"Polished by Gemini"** (similar posting exists, just polished),
+  - Layer 2 warnings (e.g. "Age requirement detected — remove before publishing").
 
-### 5.4 Paano ipagtatanggol sa panel
+### 5.4 How to defend this in the panel
 
-| Tanong ng panel | Sagot |
+| Panel question | Answer |
 |---|---|
-| "API lang ba 'yan?" | Hindi. Ang core ay sariling TF-IDF + cosine sa MR.DIY job corpus — gumagana nang walang Gemini sa karamihan ng kaso (kapag may sapat na katulad na existing posting). |
-| "Saan ang ML?" | Layer 1: TF-IDF (IDF ay natutunan mula sa job corpus) + cosine similarity retrieval + skill extraction. Parehong engine ng matching sa app. |
-| "Bakit kailangan ng Gemini kung andun na lahat sa database?" | Dahil ang Layer 1 ay umaasa sa EXISTING na kahawig na posting — walang laman kapag bagong klase ng trabaho. Doon mandatory si Gemini, dahil wala nang ibang pagkukunan ng content. Kapag may sapat nang katulad, hindi na ito ginagamit. |
-| "Paano kung mali ang Gemini?" | May guardrail (Layer 2 ulit) at HR review (Layer 4) bago ma-publish. |
-| "Explainable ba?" | Oo. Ipinapakita kung aling postings ang pinagkunan, gaano kahawig, o kung cold-start at galing talaga kay Gemini. |
+| "Isn't that just an API?" | No. The core is our own TF-IDF + cosine over the MR.DIY job corpus — it works without Gemini in most cases (when there's a sufficiently similar existing posting). |
+| "Where's the ML?" | Layer 1: TF-IDF (IDF learned from the job corpus) + cosine similarity retrieval + skill extraction. Same engine as the app's matching. |
+| "Why is Gemini needed if everything's already in the database?" | Because Layer 1 relies on an EXISTING similar posting — it has nothing when it's a new kind of job. That's when Gemini becomes mandatory, because there's no other source of content. Once there's a sufficient match, it's not used. |
+| "What if Gemini gets it wrong?" | There's a guardrail (Layer 2 again) and HR review (Layer 4) before publishing. |
+| "Is it explainable?" | Yes. It shows which postings it drew from, how similar they are, or whether it was cold-start and actually came from Gemini. |
 
-### 5.5 Mga phase
+### 5.5 Phases
 
-| Phase | Gagawin | Checkpoint |
+| Phase | What to do | Checkpoint |
 |---|---|---|
-| 1 | Layer 1 + 2 (API route sa `mrdiy-admin`, walang Gemini) | Lint + build + `curl` test |
-| 2 | UI button + "Based on" + warnings sa Jobs page | Lint + build + live test |
-| 3 | Layer 3 Gemini (cold-start handler) + guardrail | Live test: may kahawig na posting (walang Gemini) vs cold-start (may Gemini) |
+| 1 | Layer 1 + 2 (API route in `mrdiy-admin`, no Gemini) | ✅ **Done (2026-10-15)** — lint + build + `curl` test against the real database. 4 bugs found and fixed during testing (details in `CapstoneGuidePaper/jdGenerator.md`) — wrong similarity threshold, category/level overwhelming the title, two age-limit phrasings that weren't caught. |
+| 2 | UI button + "Based on" + warnings on the Jobs page | ✅ **Code done (2026-10-15)** — lint clean, build successful. Not yet verified in the browser (no browser tool in this session), still needs to be clicked through manually. |
+| 3 | Layer 3 Gemini (cold-start handler) + guardrail | ✅ **Code done (2026-10-15), with a real key too.** A real `GEMINI_API_KEY` now exists — 3 bugs found and fixed during testing (outdated model name, overly strict prompt, no timeout). Also added: retry-on-503, and variety in the generic fallback (which had its own bug — biased random pick, fixed). We haven't yet caught one fully successful real Gemini generation due to persistent "high demand" on the free tier, but every other part has been fully verified. Details in `CapstoneGuidePaper/jdGenerator.md`. |
 
-### 5.6 Resume Validator — TRAINED MODEL bilang primary, Gemini bilang fallback (desisyon 2026-10-14)
+### 5.6 Resume Validator — TRAINED MODEL as primary, Gemini as fallback (decision 2026-10-14)
 
-Ito ang pinakabagay na ite-train, nasa scope na: ang **Resume Validator** (`ResumeRepository.kt`), ngayon rule-based lang ("resume ba o hindi," 4 na signal na may hand-set na threshold).
+This is the best-fit candidate for training, already in scope: the **Resume Validator** (`ResumeRepository.kt`), currently rule-based only ("is this a resume or not," 4 hand-tuned-threshold signals).
 
-**Arkitektura:**
+**Architecture:**
 
 ```
-Na-upload na dokumento (text mula sa extraction)
+Uploaded document (text from extraction)
         │
-PRIMARY — Sariling TRAINED MODEL (offline, mabilis, libre)
-        • Binary classifier (Logistic Regression o Naive Bayes + TF-IDF)
-        • Trained sa notebook (Python/Colab) — resume dataset bilang positive
-          examples (kahit anong totoong resume, hindi mahalaga ang category —
-          ang tanong lang ay "resume ba," hindi "anong klaseng resume"),
-          hindi-resume na dokumento (recipes, invoices, artikulo) bilang negative
-        • Ie-export ang weights/vocabulary bilang JSON, at ang PREDICTION
-          (inference) mismo ay isusulat sa TypeScript — walang Python server
-          na tatakbo sa production
+PRIMARY — Own TRAINED MODEL (offline, fast, free)
+        • Binary classifier (Logistic Regression or Naive Bayes + TF-IDF)
+        • Trained in a notebook (Python/Colab) — resume dataset as positive
+          examples (any real resume counts, category doesn't matter —
+          the only question is "is this a resume," not "what kind of resume"),
+          non-resume documents (recipes, invoices, articles) as negative
+        • Weights/vocabulary exported as JSON, and the PREDICTION
+          (inference) itself is written in TypeScript — no Python server
+          runs in production
         │
 FALLBACK — Gemini API
-        • Tatawagin LANG kapag mababa ang confidence ng sariling model
-          (hal. <70%) o kapag may error ang lokal na inference
-        • Hindi ito ang unang susubukan — segundong linya lang
+        • Called ONLY when the own model's confidence is low
+          (e.g. <70%) or when local inference errors out
+        • Not the first thing tried — second line only
         │
-Resulta: "Resume" o "Hindi resume," may confidence %, at label kung saan
-         galing ang desisyon ("Sariling model" o "Gemini fallback")
+Result: "Resume" or "Not a resume," with a confidence %, and a label for
+        where the decision came from ("Own model" or "Gemini fallback")
 ```
 
-**Bakit walang live Python sa production:** training lang ang gamit ng Python (offline, Colab/notebook) — hindi ito tumatakbo sa totoong sistema. Pagkatapos ng training, ang simpleng linear model (weights + TF-IDF vocabulary) ay madaling isalin sa TypeScript function — walang kailangang i-deploy, i-host, o i-maintain na hiwalay na Python microservice. Mas kaunting babantayan, mas simple ang arkitektura.
+**Why there's no live Python in production:** Python is only used for training (offline, Colab/notebook) — it doesn't run in the real system. After training, the simple linear model (weights + TF-IDF vocabulary) is easily translated into a TypeScript function — no need to deploy, host, or maintain a separate Python microservice. Less to maintain, simpler architecture.
 
-**Ikukumpara:** luma (rules) vs bago (trained model) sa parehong test set — accuracy, precision, recall, F1. Hiwalay na desisyon ito mula sa JD Generator.
+**To be compared:** old (rules) vs new (trained model) on the same test set — accuracy, precision, recall, F1. This is a separate decision from the JD Generator.
 
-**Pagkakasunod-sunod (binago 2026-10-15 — inihanda na ang files/libs, pero ang dataset mismo ay sa dulo pa, kasunod ng research):**
+**Sequence (revised 2026-10-15 — files/libs prepared, but the dataset itself comes last, after research):**
 
-| Hakbang | Gagawin | Status |
+| Step | What to do | Status |
 |---|---|---|
-| A | I-ready ang training scaffold: folder, `requirements.txt`, script skeleton na may placeholder para sa data | ✅ Tapos na — `CapstoneGuidePaper/resume-validator-training/` (`requirements.txt`, `train_resume_validator.py`), na-verify: `pip install` + script run nang walang data, gumana ang empty-data guard |
-| B | I-research at i-curate ang dataset (checklist sa ibaba — dedupe, balance, atbp.) | Hindi pa nasisimulan — hiwalay na gawain, kailangan ng oras |
-| C | I-seed ang aktwal na dataset file (`dataset.csv`) — **SA DULO, HINDI MUNA**, kasunod lang ng B | Naghihintay sa B |
-| D | Patakbuhin ang script: clean → split → train 3 model → ikumpara → i-export ang pinakamagaling | Naghihintay sa C |
+| A | Prepare the training scaffold: folder, `requirements.txt`, script skeleton with a data placeholder | ✅ Done — `CapstoneGuidePaper/resume-validator-training/` (`requirements.txt`, `train_resume_validator.py`), verified: `pip install` + script run with no data, empty-data guard worked. **Explanation of each Python library** (what each is for, and why not PyTorch/TensorFlow): `CapstoneGuidePaper/resume-validator-training/README.md`. |
+| B | Research and curate the dataset (checklist below — dedupe, balance, etc.) | ✅ **Done (2026-10-15).** Positive (resume): a Hugging Face mirror of the Kaggle "Resume Dataset" (LiveCareer), `Shawn0069/resume_classification_kaggle` (1,986 real resumes after removing duplicates/junk). Negative (not a resume): `fancyzhx/ag_news` (120,000 news snippets, clearly not resumes — serving the same role as "recipes/invoices/articles" in the original plan). Two public datasets, no account/API key needed — downloaded via Hugging Face's `datasets-server` API (direct parquet links). |
+| C | Seed the actual dataset file (`dataset.csv`) | ✅ **Done.** `prepare_dataset.py` — sampled 500 resumes + 500 news articles (balanced), placed into `incoming/batch_001.csv`, passed `check_new_seed_data.py` (no warnings), manually moved to `approved/dataset.csv`. **1,000 rows, 500/500 balanced.** |
+| D | Run the script: clean → split → train 3 models → compare → export the best one | ✅ **Done, real results.** F1: Logistic Regression 0.995, Naive Bayes 0.990, Linear SVM 1.000. Exported Logistic Regression (`resume_validator_weights.json`, 5,000-word vocabulary) — chosen because it's the only "linear model" that can be exported as a simple weights+vocabulary JSON for TypeScript inference (§5.6), even though SVM scored higher on F1. **Bug found and fixed:** `numpy.int64` in the vocabulary dict can't be JSON-serialized directly — cast to plain Python `int` before exporting. |
 
-**Checklist — mga dapat iwasan sa training data (desisyon 2026-10-15)**
+**Data-poisoning safeguards — code done, not just a warning (2026-10-15)**
 
-Bago mag-train, suriin muna ang dataset laban dito — mahalaga ito dahil **walang awtomatikong senyales na masama ang na-seed na data**; ang ebalwasyon lang (F1/accuracy sa test set) ang magpapakita nito, kaya kailangang maiwasan na ang mga problema BAGO pa mag-train:
+In addition to the checklist below, this is a **real safeguard** built into the workflow itself, not just a reminder:
 
-1. **Duplicate/halos-magkaparehong examples** — pinakamapanganib kung may kopya sa parehong train AT test set ("data leakage"): mukhang mataas ang accuracy pero peke, hindi totoong galing sa pagkatuto. Tanggalin ang duplicates bago i-split.
-2. **Class imbalance** — kung malayo ang bilang ng positive (resume) at negative (hindi-resume) examples, matututo lang ang model na laging sagutin ang mas maraming klase. Tiyaking magkalapit ang bilang, o tingnan ang precision/recall per class, hindi lang overall accuracy.
-3. **Masyadong madaling negative examples** — kung halatang-halata ang mga "hindi resume" (hal. random na artikulo), matututo lang ng shortcut ang model sa halip na talagang umintindi. Isama ang mahirap/malapit na negative examples.
-4. **Maling label (label noise)** — mag-spot-check ng sample ng dataset bago gamitin, lalo na kung scraped/third-party na source.
-5. **Distribution mismatch — partikular sa atin** — English lang ang Kaggle dataset (LiveCareer/US), pero ang totoong applicants natin ay maaaring sumulat sa **Taglish o heavily-localized English**. Kailangang magdagdag ng ilang totoong Taglish/Filipino resume sa TEST set (kahit kaunti) para masukat kung gumagana pa rin ito sa totoong gagamit, hindi lang sa purong English na dataset.
+- **`incoming/` vs `approved/` staging folders** — the training script reads ONLY from `approved/dataset.csv`, never directly from `incoming/`. No new data is simply "trusted."
+- **`check_new_seed_data.py`** — run this against every new batch BEFORE moving it to `approved/`. It checks: (1) format/missing columns, (2) labels that aren't 0/1, (3) text that's too short (<50 chars), (4) duplicates within the batch, (5) duplicates/near-duplicates against the ALREADY-APPROVED dataset (train/test leakage risk), (6) a sudden shift in class ratio vs the existing dataset. Nothing moves to `approved/` automatically — a human still makes the final call, even if every check passes.
+- **Evaluation gate on export** — `export_logistic_regression()` **refuses to export** if the new model's F1 is lower than the last exported version — a better model can never be silently replaced by a worse one, even by accident.
+- **Verified:** tested `check_new_seed_data.py` against deliberately broken sample data (wrong label, duplicate, too short) — correctly caught each one, correct exit code.
 
-### 5.7 Mga patakaran na dapat sundin ng LAHAT ng AI feature (Gemini man o trained model) — desisyon 2026-10-14
+**Checklist — things to avoid in training data (decision 2026-10-15)**
 
-**A. Scoped/guarded prompt — hindi sasagot sa labas ng saklaw.**
-- Bawat tawag sa Gemini ay may mahigpit na system prompt na naglilimita lang sa gawain nito (hal. "job description generation para sa MR.DIY retail roles LANG" o "resume classification LANG") — kung may subukang magtanong ng ibang bagay (general chat, ibang paksa), tatanggi o babalik sa default na walang-kinalaman-dito na sagot.
-- Ito ang isasagot sa panel kung tanungin: "Hindi ito pangkalahatang chatbot — may mahigpit na hangganan ang bawat AI call."
+Before training, check the dataset against this list first — this matters because **there's no automatic signal that seeded data is bad**; only evaluation (F1/accuracy on the test set) will reveal it, so these problems need to be avoided BEFORE training:
 
-**B. Traceable sources — kinakailangan ng transparency ang applicant/HR.**
-- Bawal maging "black box" ang kahit anong AI output. Bawat resulta ay dapat may **masusundan na basehan sa loob mismo ng sistema** — hindi literal na external na link, kundi concrete na reference:
-  - JD Generator → "Based on: [job postings na ginamit] + similarity %" (§5.3)
-  - Matching/ranking → "Why this rank" na may keyword breakdown (nasa sistema na)
-  - Resume Validator → aling mga signal/salita ang nag-trigger ng desisyon, at kung sariling model o Gemini fallback ang nagbigay ng resulta
-- Ito ang parehong diwa ng Explainable AI na meron na tayo — pinapalawak lang ito bilang **patakaran para sa lahat ng susunod pang AI feature**, hindi lang sa matching.
+1. **Duplicate/near-identical examples** — most dangerous if a copy ends up in both the train AND test set ("data leakage"): accuracy looks high but is fake, not genuinely learned. Remove duplicates before splitting.
+2. **Class imbalance** — if the count of positive (resume) and negative (not-resume) examples is far apart, the model will just learn to always answer the majority class. Keep the counts close, or look at precision/recall per class, not just overall accuracy.
+3. **Negative examples that are too easy** — if the "not a resume" examples are too obvious (e.g. random articles), the model will just learn a shortcut instead of truly understanding. Include hard/close negative examples too.
+4. **Mislabeled data (label noise)** — spot-check a sample of the dataset before using it, especially if it's a scraped/third-party source.
+5. **Distribution mismatch — specific to us** — the Kaggle dataset is English-only (LiveCareer/US), but our real applicants may write in **Taglish or heavily-localized English**. Some real Taglish/Filipino resumes need to be added to the TEST set (even a small number) to measure whether it still works for real users, not just on a purely English dataset.
 
-### 5.8 Relasyon ni Gemini sa buong AI ng sistema — hindi lang para sa FAQ (desisyon 2026-10-15)
+### 5.7 Rules that ALL AI features must follow (whether Gemini or a trained model) — decision 2026-10-14
 
-Iisang papel si Gemini sa **lahat** ng AI feature, hindi lang sa conversational assistant (§6.3): **hinahawakan nito ang mga kaso na hindi kaya ng sariling ML/database ng sistema** — hindi ito pangkalahatang generator, kundi laging may tiyak na "gap" na pinupunan.
+**A. Scoped/guarded prompt — won't answer outside its scope.**
+- Every call to Gemini has a strict system prompt that limits it only to its task (e.g. "job description generation for MR.DIY retail roles ONLY" or "resume classification ONLY") — if someone tries to ask something else (general chat, other topics), it refuses or falls back to a default unrelated response.
+- This is the answer for the panel if asked: "This isn't a general-purpose chatbot — every AI call has a strict boundary."
 
-| Feature | Sariling ML/data (unang susubukan) | Kailan "gap" na pupunan ni Gemini |
+**B. Traceable sources — applicants/HR need transparency.**
+- No AI output is allowed to be a "black box." Every result must have a **traceable basis within the system itself** — not necessarily a literal external link, but a concrete reference:
+  - JD Generator → "Based on: [job postings used] + similarity %" (§5.3)
+  - Matching/ranking → "Why this rank" with a keyword breakdown (already in the system)
+  - Resume Validator → which signals/words triggered the decision, and whether the own model or the Gemini fallback produced the result
+- This is the same spirit as the Explainable AI we already have — just extended as **a rule for every future AI feature**, not only matching.
+
+### 5.8 Gemini's role across the system's AI — not just for the FAQ (decision 2026-10-15)
+
+Gemini has one consistent role across **all** AI features, not just the conversational assistant (§6.3): **it handles the cases the system's own ML/database can't** — it's not a general-purpose generator, but always fills a specific "gap."
+
+| Feature | Own ML/data (tried first) | When Gemini fills the "gap" |
 |---|---|---|
-| **JD Generator** (§5) | TF-IDF retrieval sa existing MR.DIY job postings | **Cold start** — walang/kaunting kahawig na posting sa database (bagong klase ng trabaho) |
-| **Resume Validator** (§5.6) | Trained binary classifier (Logistic Regression/Naive Bayes + TF-IDF) | **Mababang confidence** — hindi sigurado ang sariling model kung resume ba o hindi |
-| **Document verification** (§6.2, hindi pa ginagawa) | — (walang kasalukuyang automated check) | **Buong task** — walang sariling vision/OCR model, kaya si Gemini Vision mismo ang gagawa ng pagbasa ng dokumento, laging may guardrail (format check, expiry parsing) |
-| **FAQ assistant** (§6.3, hindi pa ginagawa) | Existing job/requirement data bilang context | **Natural-language na tanong** — hindi structured query, kaya kailangan ng conversational layer sa ibabaw ng structured data |
+| **JD Generator** (§5) | TF-IDF retrieval over existing MR.DIY job postings | **Cold start** — no/few similar postings in the database (a new kind of job) |
+| **Resume Validator** (§5.6) | Trained binary classifier (Logistic Regression/Naive Bayes + TF-IDF) | **Low confidence** — the own model isn't sure whether it's a resume or not |
+| **Document verification** (§6.2, not yet built) | — (no current automated check) | **The whole task** — no own vision/OCR model, so Gemini Vision itself does the document reading, always with a guardrail (format check, expiry parsing) |
+| **FAQ assistant** (§6.3, not yet built) | Existing job/requirement data as context | **Natural-language questions** — not a structured query, so a conversational layer over the structured data is needed |
 
-**Ang pattern:** database/sariling ML muna (mabilis, libre, explainable) → Gemini lang kapag may tunay na puwang na hindi kaya nito — cold start, mababang confidence, walang existing na automated check, o natural-language na input. Hindi ito "AI para lang gumana ang AI" — may partikular na dahilan bakit ito tumatakbo sa bawat pagkakataon, at laging naka-dokumento kung bakit (§5.7B, traceable sources).
+**The pattern:** database/own ML first (fast, free, explainable) → Gemini only when there's a real gap it can't cover — cold start, low confidence, no existing automated check, or natural-language input. This isn't "AI just so AI runs" — there's a specific reason it runs in each case, and the reason is always documented (§5.7B, traceable sources).
 
 ---
 
-## Section 6: Mga karagdagang direksyon kung paano palalawakin ang AI — PLANO PA LANG (2026-10-14)
+## Section 6: Additional directions for expanding the AI — PLANNED (2026-10-14)
 
-Mga opsyon na pinag-usapan kung paano pa palalawigin ang AI ng sistema, bukod sa JD Generator (§5) at Resume Validator (§5.6). Walang code pa; nakalista lang bilang mga pagpipilian.
+Options discussed for further expanding the system's AI, beyond the JD Generator (§5) and Resume Validator (§5.6). No code yet; listed only as options.
 
-**6.1 Proactive re-matching (pinaka-madali, pinaka-ligtas — rekomendado unahin)**
+**6.1 Proactive re-matching (easiest, safest — recommended first)**
 
-- Kapag may bagong job posting, i-scan ang mga DATING applicant na malapit na sa match threshold pero hindi na-hire (hindi dahil kulang sa skills, kundi dahil sa branch/timing) — papadalhan sila ng notification: "May bagong Cashier opening sa Cainta, baka bagay sa iyo."
-- **Walang bagong model.** Ginagamit lang ang existing TF-IDF + cosine engine (`lib/matching.ts`) sa ibang direksyon — job-to-past-applicants sa halip na resume-to-jobs. Pure "trigger/notify" layer sa ibabaw ng ML na meron na.
+- When a new job posting is created, scan PAST applicants who were close to the match threshold but weren't hired (not due to lacking skills, but due to branch/timing) — send them a notification: "A new Cashier opening is available in Cainta, might suit you."
+- **No new model.** Just uses the existing TF-IDF + cosine engine (`lib/matching.ts`) in a different direction — job-to-past-applicants instead of resume-to-jobs. A pure "trigger/notify" layer on top of the ML that already exists.
 
-**6.2 Document verification AI (pinaka-malaking dagdag, bagong dependency)**
+**6.2 Document verification AI (biggest addition, new dependency)**
 
-- Ngayon, manual pa rin ang pag-verify ni HR ng na-upload na NBI Clearance/SSS/Valid ID (titingnan lang ang litrato). Gamit ang vision/OCR AI (Gemini Vision), awtomatikong babasahin ang laman ng dokumento — susuriin kung tugma ang pangalan sa profile, kung expired na, kung kumpleto ang detalye.
-- Bagong modality (larawan, hindi text lang) — totoong oras na matitipid ni HR, pero may bagong external dependency (vision API) na dapat sundin ang parehong patakaran sa §5.7 (scoped prompt + traceable na basehan, hal. "dito nabasa ang petsa ng expiry").
+- Currently, HR verification of uploaded NBI Clearance/SSS/Valid ID is still manual (just looking at the photo). Using vision/OCR AI (Gemini Vision), the document's content would be read automatically — checking if the name matches the profile, if it's expired, if the details are complete.
+- A new modality (images, not just text) — real time savings for HR, but a new external dependency (vision API) that must follow the same rules in §5.7 (scoped prompt + traceable basis, e.g. "this is where the expiry date was read from").
 
-**6.3 Conversational assistant para sa applicant FAQs**
+**6.3 Conversational assistant for applicant FAQs**
 
-- Chatbot na sasagot ng mga tanong tungkol sa isang job posting o sa proseso ng application, gamit ang existing job/requirement data bilang context (grounded, hindi basta malayang chat — parehong patakaran sa §5.7A).
-- Extension ng Gemini layer, pero para sa applicant side ngayon sa halip na admin side.
+- A chatbot that answers questions about a job posting or the application process, using existing job/requirement data as context (grounded, not free-form chat — same rule as §5.7A).
+- An extension of the Gemini layer, but for the applicant side this time instead of the admin side.
 
-**Pagkakasunod-sunod na mungkahi:** 6.1 muna (walang bagong dependency, mabilis maipapakita), tapos 6.2 kung gusto ng mas "makapal" na AI feature para sa defense, 6.3 kung may oras pa.
+**Suggested order:** 6.1 first (no new dependency, quick to demo), then 6.2 if a "weightier" AI feature is wanted for the defense, 6.3 if there's still time.

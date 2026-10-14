@@ -53,6 +53,36 @@ type JobForm = {
   contractDurationMonths: string;
 };
 
+type GeneratorResult = {
+  draft: {
+    aboutRole: string;
+    responsibilities: string[];
+    requirements: string[];
+    benefits: string[];
+  };
+  basedOn: { id: string; title: string; similarity: number }[];
+  coldStart: boolean;
+  warnings: { message: string }[];
+  source: "layer1-retrieval" | "layer3-gemini" | "layer2-generic";
+  geminiUnavailable?: string;
+  geminiAttemptRejected?: { message: string }[];
+};
+
+const SOURCE_BADGE: Record<GeneratorResult["source"], { label: string; className: string }> = {
+  "layer1-retrieval": {
+    label: "Generated from existing postings",
+    className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  },
+  "layer3-gemini": {
+    label: "Written by Gemini — no similar role yet",
+    className: "border-violet-200 bg-violet-50 text-violet-700",
+  },
+  "layer2-generic": {
+    label: "No similar posting found — generic draft",
+    className: "border-amber-200 bg-amber-50 text-amber-700",
+  },
+};
+
 const emptyForm: JobForm = {
   title: "",
   description: "",
@@ -95,6 +125,10 @@ export default function JobsPage() {
   const [form, setForm] = useState<JobForm>({
     ...emptyForm,
   });
+
+  const [generating, setGenerating] = useState(false);
+  const [generatorError, setGeneratorError] = useState("");
+  const [generatorResult, setGeneratorResult] = useState<GeneratorResult | null>(null);
 
   useEffect(() => {
     loadJobs();
@@ -150,6 +184,8 @@ export default function JobsPage() {
 
     setError("");
     setSuccess("");
+    setGeneratorResult(null);
+    setGeneratorError("");
     setShowModal(true);
   }
 
@@ -177,6 +213,8 @@ export default function JobsPage() {
 
     setError("");
     setSuccess("");
+    setGeneratorResult(null);
+    setGeneratorError("");
     setShowModal(true);
   }
 
@@ -191,12 +229,62 @@ export default function JobsPage() {
     });
 
     setError("");
+    setGeneratorResult(null);
+    setGeneratorError("");
   }
 
   function updateForm(field: keyof JobForm, value: string) {
     setForm((current) => ({
       ...current,
       [field]: value,
+    }));
+  }
+
+  /** Phase 1+2 of the AI Job Description Generator (CAPSTONE_ADVANCED_AI_PLANNING.md §5). */
+  async function handleGenerateDescription() {
+    if (!form.title.trim()) {
+      setGeneratorError("Enter a job title first.");
+      return;
+    }
+
+    setGenerating(true);
+    setGeneratorError("");
+    setGeneratorResult(null);
+
+    try {
+      const response = await fetch("/api/jobs/generate-description", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: form.title.trim(),
+          category: form.category || null,
+          level: form.level || null,
+          branchId: form.branchId || null,
+          contractDurationMonths: form.contractDurationMonths ? Number(form.contractDurationMonths) : null,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not generate a description.");
+
+      setGeneratorResult(data as GeneratorResult);
+    } catch (err) {
+      setGeneratorError(err instanceof Error ? err.message : "Could not generate a description.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  /** Fills the form with the generated draft — HR still reviews and edits before saving (Layer 4). */
+  function applyGeneratedDraft() {
+    if (!generatorResult) return;
+    const { draft } = generatorResult;
+    setForm((current) => ({
+      ...current,
+      description: draft.aboutRole,
+      responsibilities: draft.responsibilities.join("\n"),
+      requirements: draft.requirements.join("\n"),
+      benefits: draft.benefits.join("\n"),
     }));
   }
 
@@ -294,6 +382,9 @@ export default function JobsPage() {
     setForm({
       ...emptyForm,
     });
+
+    setGeneratorResult(null);
+    setGeneratorError("");
 
     await loadJobs();
   }
@@ -1123,9 +1214,19 @@ export default function JobsPage() {
               {/* DESCRIPTION */}
 
               <div className="mt-5">
-                <label className="mb-2 block text-sm font-semibold text-slate-700">
-                  Job Description
-                </label>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <label className="block text-sm font-semibold text-slate-700">
+                    Job Description
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateDescription}
+                    disabled={generating}
+                    className="border border-[#e30613] px-3 py-1.5 text-xs font-semibold text-[#e30613] hover:bg-red-50 disabled:opacity-50"
+                  >
+                    {generating ? "Generating…" : "✨ Generate description"}
+                  </button>
+                </div>
 
                 <textarea
                   value={form.description}
@@ -1139,6 +1240,69 @@ export default function JobsPage() {
                   rows={6}
                   className="w-full resize-none border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#e30613]"
                 />
+
+                {generatorError && (
+                  <p className="mt-2 text-xs font-semibold text-red-600">{generatorError}</p>
+                )}
+
+                {generatorResult && (
+                  <div className="mt-3 border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span
+                        className={`inline-flex border px-2.5 py-1 text-[11px] font-semibold ${SOURCE_BADGE[generatorResult.source].className}`}
+                      >
+                        {SOURCE_BADGE[generatorResult.source].label}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={applyGeneratedDraft}
+                        className="bg-[#e30613] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#c80511]"
+                      >
+                        Use this draft
+                      </button>
+                    </div>
+
+                    {generatorResult.basedOn.length > 0 && (
+                      <p className="mt-2 text-xs text-slate-500">
+                        <span className="font-semibold text-slate-700">Based on:</span>{" "}
+                        {generatorResult.basedOn
+                          .map((item) => `${item.title} (${item.similarity}% similar)`)
+                          .join(", ")}
+                      </p>
+                    )}
+
+                    {generatorResult.geminiUnavailable && (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Gemini wasn&apos;t used ({generatorResult.geminiUnavailable}) — showing a generic draft instead.
+                      </p>
+                    )}
+
+                    {generatorResult.geminiAttemptRejected && (
+                      <div className="mt-2 text-xs text-slate-500">
+                        <p>Gemini&apos;s draft didn&apos;t pass the compliance check, so a generic draft is shown instead:</p>
+                        <ul className="mt-1 space-y-0.5">
+                          {generatorResult.geminiAttemptRejected.map((warning, index) => (
+                            <li key={index}>— {warning.message}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {generatorResult.warnings.length > 0 && (
+                      <ul className="mt-2 space-y-1">
+                        {generatorResult.warnings.map((warning, index) => (
+                          <li key={index} className="text-xs font-semibold text-red-600">
+                            ⚠ {warning.message}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <p className="mt-3 text-xs italic text-slate-500">
+                      {generatorResult.draft.aboutRole}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* RESPONSIBILITIES / REQUIREMENTS / BENEFITS (one item per line) */}
