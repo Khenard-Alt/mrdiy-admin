@@ -274,9 +274,13 @@ Base sa totoong pagtingin sa Kotlin code (hindi haka-haka) — apat na bagay:
 
 **R1. Status na HINDI pa kilala ng Android app: Resigned, Terminated, Contract Ended**
 
-- `ApplicationDetailFragment.kt` → `timelineCard(status)` (linya 148-158): hardcoded lang sa `["Pending","Reviewed","Shortlisted","Interview Scheduled","Hired"]`. Kapag Resigned/Terminated/Contract Ended ang status, **bumabalik sa index 0 ("Submitted")** — mali, hindi lang blangko.
-- `statusChip(status)` (linya 403-419): walang branch para sa 3 bagong status — nahuhulog sa `else`, nagiging **dilaw/"pending" na kulay** kahit tapos na talaga ang trabaho.
-- **Gagawin:** dagdagan ang timeline + status chip logic ng 3 bagong status, may sariling kulay/icon (match sa ginawa na natin sa admin: Resigned = sky blue, Terminated = rose, Contract Ended = amber).
+- **Totoong ugat ng bug (nahanap 2026-10-14):** hindi talaga sa `timelineCard`/`statusChip` nagsisimula — sa **`DateText.normalizeStatus()`** mismo. Walang branch doon para sa Resigned/Terminated/Contract Ended, kaya nahuhulog ang lahat sa `else -> "Pending"`. Ibig sabihin, kahit saan ginagamit ang function na 'to (status chip, timeline, list ng applications, **pati pag-tap sa notification** gaya ng "Resignation recorded" o "Clearance cleared" — doon rin dumadaan papunta sa parehong screen) ay nagpapakita ng maling "Pending/Submitted" — hindi lang display issue sa isang component, system-wide ang epekto.
+- **Gagawin / tapos na (2026-10-14):**
+  - `DateText.kt` → dinagdagan ang `normalizeStatus()` ng `resigned`, `terminated`, `contract ended`, `withdrawn` (tugma sa `lib/pipeline.ts`'s `STATUS_VALUES`/`ALIASES`). Bagong `isEndedEmployment()` helper.
+  - `statusChip()` — bagong kulay: Resigned = sky blue, Terminated = rose, Contract Ended = amber (parehong scheme ng admin web `statusClasses()`).
+  - `timelineCard()` — kapag ended-employment status, buong timeline na ngayon ang makikitang tapos (dahil dumaan na talaga sa Hired), sa halip na bumalik sa step 1.
+  - `render()` — bagong explanatory card ("Resignation recorded" / "Employment ended" / "Contract ended") katulad ng existing Rejected/On Hold card, at tinanggal na ang "How soon can I start?" card (hindi na applicable).
+- Gradle build successful. Hindi pa na-verify live.
 
 **R2. Bagong impormasyon na dapat makita sa Application Detail (wala pa ngayon)**
 
@@ -354,6 +358,17 @@ Kapalit ng "i-print → pisikal na pirmahan → kunan ng litrato → i-upload" �
 - **Applicant-side notice** (`mrdiyreact`): `app/src/main/java/com/mrdiy/careers/ui/base/DateText.kt` — bagong `daysUntil(iso, dueDays)` helper. `ApplicationDetailFragment.kt` — kinopya ang parehong `REQUIREMENT_DUE_DAYS` map (Kotlin version, dahil web-only ang `lib/pipeline.ts`), nagpapakita na ngayon ng "Due in X days" o "Overdue by X days — please submit as soon as possible" sa ilalim ng bawat hindi pa Verified na item sa **My Application → Pre-employment documents** screen. Gradle build successful.
 - **Admin notification** (`mrdiy-admin`): bagong `remindRequirementsOverdue()` sa `app/api/applications/route.ts`, parehong lazy-trigger pattern ng `remindContractsEnding`/`remindFinalPayOverdue` — tumitingin sa lahat ng Hired applicant's `pre_employment_requirements`, kapag may lumagpas na sa sariling due-date (`REQUIREMENT_DUE_DAYS`), gumagawa ng `admin_alerts` row (type `REQUIREMENT_OVERDUE`) papunta sa super_admin/hr_officer/branch manager ng kanilang branch — makikita sa Alerts bell. Isang beses lang per application ang alert (parehong simplification ng ibang dalawang reminder — hindi muna hiwalay per-item), checked lazily sa bawat `/api/applications` load, walang bagong cron/migration kailangan. Build successful.
 
+### V. Android bug — notification hindi nagde-deep-link sa tamang application (nahanap at na-ayos 2026-10-14)
+
+- **Sintomas:** sinabi ng user: "nagnonotif sa app yung clearance cleared, pero pag pinindot mapupunta sa application at pending nga" — pati "resignation recorded" ganun din. Pag-tap sa notification, diretso sa generic Applications LIST, hindi sa specific application — at dati, dahil sa R1 bug, mali pang status ang nakikita doon.
+- **Totoong ugat:** ang `public.alerts` table (applicant-facing notifications) ay **walang `application_id` column** mula pa noong una — may `job_id` lang. Kaya kahit saang alert type na APPLICATION_UPDATE/INTERVIEW_INVITE (status change, "Clearance complete," "Resignation recorded," interview invite/cancel, branch transfer offer, document verified/rejected), walang paraan para malaman kung aling specific na application ang tinutukoy — system-wide na gap, hindi isolated sa isang notification lang. (Kompara: ang `admin_alerts`, HR-facing na kapareho nito, ay may `application_id` na mula pa noong una.)
+- **Gagawin / tapos na:**
+  - Migration `202610140001_alert_application_id.sql` — bagong `application_id` column sa `public.alerts` (FK papunta sa `applications`, `on delete set null`), bagong index, at na-update ang `notify_application_received()` trigger para isama rin ito.
+  - `lib/notifications.ts` — bagong `application_id` field sa `AlertInsert` type at `applicationStatusAlert()` helper, isinama rin sa push-notification data payload.
+  - Dinagdagan ng `application_id` ang **lahat** ng alert-insertion sa web: `applications/route.ts` (status change), `applications/resign/route.ts`, `applications/awol/route.ts` (return-to-work notice + termination), `applications/assign/route.ts` (branch transfer offer), `interviews/route.ts` (invite + cancel), `exit-checklist/route.ts` (clearance complete), `requirements/route.ts` (document verified/rejected).
+  - Android: `model/Alert.kt` + `InboxRepository.kt` (`AlertRow`/mapping, kasama ang fallback path) — bagong `applicationId` field. `AlertsFragment.kt`'s `openAlert()` — kapag may `applicationId` ang alert, diretso na sa `applicationDetailFragment` (parehong specific application), hindi na sa generic list; kung wala (lumang alert bago pa ang fix), babalik sa dating generic-list behavior bilang fallback.
+- Lint clean, build successful (web + Android), **na-verify live**: na-trigger ang isang totoong status-change alert (khenard's application → On Hold), at kumpirmadong tama ang `application_id` na naka-attach sa bagong alert row sa database.
+
 ### S. Admin web bug — paulit-ulit na nagde-download ang resume (nahanap at na-ayos 2026-10-14)
 
 - **Sintomas:** sa Applications modal, pag-click ng kahit anong button na nag-a-update ng application (status, tags, hand-off, atbp.), paulit-ulit na "nagde-download" ang resume ng applicant kahit hindi yun ang pinindot.
@@ -365,6 +380,35 @@ Kapalit ng "i-print → pisikal na pirmahan → kunan ng litrato → i-upload" �
   - Pag `.pdf`, ganun pa rin — lumalabas ang `<iframe>` preview.
   - Pag hindi `.pdf` (hal. `.docx`), **hindi na gagawa ng blangkong iframe** — sa halip, lalabas ang malinaw na paalala: "Preview not available for this file type... use Open Full Resume or Download Resume instead."
 - Build successful.
+
+### U. Applicant/Employee directory + employment history — PLANO PA LANG, hindi pa code (request ng user 2026-10-14)
+
+Tatlong magkakaugnay na kahilingan, lahat tungkol sa "makita ang buong larawan ng isang tao sa buong MR.DIY," hindi lang sa isang application o isang branch.
+
+**U1. Buong Applicant Directory ni HR — table na may filter at pagination — TAPOS NA (2026-10-14)**
+
+- **Kasalukuyan (dati):** ang `/applications` page ay naglilista lang ng mga APPLICATION (per job, maaaring paulit-ulit ang parehong tao kung maraming beses siyang nag-apply), may basic status filter pero **walang pagination** — lahat ng rows ay kinukuha at ipinapakita nang sabay.
+- **Ginawa:**
+  - Bagong `GET /api/directory` — HR/super_admin lang (`hasRole` guard, 403 sa branch_manager, dahil may sarili na silang branch-scoped na views sa `/applications` at `/employees`). Kinukuha lahat ng `applications`, i-group by `user_id` (pinakabago na application ang representative ng bawat tao), pagkatapos i-filter (search sa pangalan/email/phone, status, branch, date range) at i-paginate — lahat sa memory, dahil kasya naman sa laki ng totoong dataset ng isang retail chain, kagaya ng ginawa na rin sa ibang parte ng system.
+  - Bagong page `/directory` — table na may **Search, Status, Branch, Applied from/to** na filters, "Clear filters" button, at Previous/Next pagination (20 kada page). Bagong item sa Sidebar ("Applicant Directory", HR/super_admin lang, parehong role-gating pattern ng "Jobs"/"Accounts").
+  - Bawat row, pag na-click, dumadaan sa parehong deep-link (`/applications?open=<id>`) na ginawa na natin para sa Interview Calendar — bubuksan agad ang pinakabagong application ng taong 'yon, at kung may higit sa isa siyang application, lalabas na rin agad ang `EmploymentHistoryPanel` (U2) sa parehong modal.
+- Lint clean, build successful, **na-verify live** via curl: tama ang listahan (2 tao), tama ang status filter (`status=Hired` → 1 lang), tama ang search filter (`search=viviene` → 1 lang), at kumpirmadong naka-block (403) ang access para sa hindi HR/super_admin.
+
+**U2. Employment history ng isang applicant (HR — company-wide) — TAPOS NA (2026-10-14)**
+
+- **Kahilingan:** "dapat nakikita yung history ng applicant, kung nakapagwork naba sya sa MRDIY at kung saan na branch" — ibig sabihin, kapag binuksan ni HR ang profile ng isang applicant, makikita niya ang **lahat** ng dati at kasalukuyang application/employment niya sa MR.DIY, kahit saang branch, kahit anong resulta (Hired, Resigned, Terminated, Rejected, atbp.) — hindi lang yung isang application na kasalukuyang tinitingnan.
+- **Ginawa:**
+  - Bagong `GET /api/applications/history?userId=<id>` — lahat ng `applications` rows na may parehong `user_id`, may job title, branch name, status, petsa ng pag-apply, at (kung meron) resignation date/last working day/termination reason/contract dates.
+  - Bagong `EmploymentHistoryPanel.tsx` sa Applications modal — lumalabas lang kapag **higit sa isa** ang application ng parehong tao (kung isa lang, wala namang "history" na ipapakita). Naka-highlight ang kasalukuyang application na binubuksan ("currently viewing"), kulay-coded status (parehong `statusClasses()` ng ibang panel).
+  - **Parehong implementation na rin ang U3** (branch-scoped na bersyon para sa manager) — ang API mismo ang nag-e-enforce ng `.eq("branch_id", session.branchId)` kapag `branch_manager` ang session, kaya isang component/endpoint lang ang ginawa para sa dalawang request (U2 at U3).
+- Lint clean, build successful, **na-verify live** via curl (`/api/applications/history?userId=...` — tamang history ang nabalik para kay Viviene: Resigned, Cainta Rizal branch, may resignation/last-working-day dates).
+
+**U3. Employment history — Branch Manager (sariling branch lang) — TAPOS NA (2026-10-14, kasabay ng U2)**
+
+- **Parehong U2, pero naka-scope lang sa sariling branch ng manager** — makikita niya ang history ng isang applicant/employee **sa loob ng kanyang branch lang**, hindi sa ibang branch (privacy/scope — hindi dapat makita ng isang branch manager ang buong company-wide history, HR/super_admin lang).
+- **Ginawa:** hindi na kinailangan ng hiwalay na component — ang `/api/applications/history` mismo ay nag-e-enforce ng `.eq("branch_id", session.branchId)` kapag `branch_manager` ang session (parehong RBAC pattern sa buong system), kaya ang **parehong `EmploymentHistoryPanel.tsx` ng U2** ang gumagana nang tama para sa dalawang role nang walang extra code.
+
+**Kumpleto na ang buong Section U** (U1, U2, U3) — walang natitirang item.
 
 ### J. Seguridad at audit
 - Password hashing, limit sa maling login, session na mapapawalang-bisa.

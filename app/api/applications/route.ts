@@ -530,7 +530,7 @@ export async function PATCH(request: NextRequest) {
     const content = statusContent(next, job?.title ?? null, firstName);
 
     // 1) The applicant's notification (bell, phone tray).
-    const statusAlert = applicationStatusAlert(existing.user_id, existing.job_id, job?.title ?? null, next);
+    const statusAlert = applicationStatusAlert(existing.user_id, existing.job_id, job?.title ?? null, next, existing.id);
     if (statusAlert) await insertAlerts(supabase, [statusAlert]);
 
     // 2) Hired: create the pre-employment document checklist.

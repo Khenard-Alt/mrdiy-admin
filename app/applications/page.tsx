@@ -6,6 +6,7 @@ import AdminAlertsBell from "@/components/AdminAlertsBell";
 import Sidebar from "@/components/Sidebar";
 import { useRealtimeRefresh } from "@/lib/useRealtimeRefresh";
 import ApplicantReview from "./ApplicantReview";
+import EmploymentHistoryPanel from "./EmploymentHistoryPanel";
 import InterviewPanel from "./InterviewPanel";
 import RequirementsPanel from "./RequirementsPanel";
 import ProfileDocumentsPanel from "./ProfileDocumentsPanel";
@@ -1105,6 +1106,14 @@ export default function ApplicationsPage() {
                 key={`${selectedApplication.id}-${reviewVersion}`}
                 applicationId={selectedApplication.id}
               />
+
+              {selectedApplication.user_id && (
+                <EmploymentHistoryPanel
+                  key={`${selectedApplication.id}-history-${reviewVersion}`}
+                  userId={selectedApplication.user_id}
+                  currentApplicationId={selectedApplication.id}
+                />
+              )}
 
               {/* ==================================================
                   RESUME (ORIGINAL FILE, FOR DOUBLE-CHECKING)

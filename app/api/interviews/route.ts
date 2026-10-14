@@ -215,6 +215,7 @@ export async function POST(request: NextRequest) {
         interviewMode === "online" ? " (online)" : ` at ${saved.venue}`
       }`,
       job_id: application.job_id,
+      application_id: applicationId,
     },
   ]);
 
@@ -317,6 +318,7 @@ export async function PATCH(request: NextRequest) {
         title: "Interview cancelled",
         message: `Your interview for ${jobTitle} was cancelled. We will contact you with a new schedule.`,
         job_id: interview.job_id,
+        application_id: interview.application_id,
       },
     ]);
 

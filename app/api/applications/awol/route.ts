@@ -83,6 +83,7 @@ export async function POST(request: NextRequest) {
           user_id: application.user_id,
           type: "APPLICATION_UPDATE",
           job_id: application.job_id,
+          application_id: applicationId,
           title: "Return to work notice",
           message:
             "You have been absent without notice. Please contact MR.DIY Human Resources immediately to explain or return to work.",
@@ -203,6 +204,7 @@ export async function POST(request: NextRequest) {
           user_id: application.user_id,
           type: "APPLICATION_UPDATE",
           job_id: application.job_id,
+          application_id: applicationId,
           title: content.title,
           message: content.alert,
         },

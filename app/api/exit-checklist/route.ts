@@ -94,6 +94,7 @@ export async function PATCH(request: NextRequest) {
         type: "APPLICATION_UPDATE",
         title: "Clearance complete",
         message: "Your exit clearance is complete. We will release your final pay within the required period.",
+        application_id: row.application_id,
       },
     ]);
   }

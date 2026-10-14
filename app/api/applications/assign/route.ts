@@ -143,6 +143,7 @@ export async function POST(request: NextRequest) {
           title: "Branch transfer offer",
           message: `MR.DIY ${branch.name} would like to consider your application. Open the app to accept or decline.`,
           job_id: application.job_id,
+          application_id: id,
         },
       ]);
     }

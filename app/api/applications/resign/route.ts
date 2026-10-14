@@ -114,6 +114,7 @@ export async function POST(request: NextRequest) {
         user_id: application.user_id,
         type: "APPLICATION_UPDATE",
         job_id: application.job_id,
+        application_id: applicationId,
         title: content.title,
         message: content.alert,
       },

@@ -101,12 +101,14 @@ export async function PATCH(request: NextRequest) {
           message: allVerified
             ? "All your pre-employment documents are verified. We will contact you about your start date."
             : `Your ${row.requirement_name} was verified.`,
+          application_id: row.application_id,
         }
       : {
           user_id: row.user_id,
           type: "APPLICATION_UPDATE",
           title: "Document needs attention",
           message: `Your ${row.requirement_name} was returned: ${(remarks ?? "").trim()} Please upload it again.`,
+          application_id: row.application_id,
         },
   ]);
 

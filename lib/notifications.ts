@@ -29,6 +29,7 @@ export type AlertInsert = {
   title: string;
   message: string;
   job_id?: string | null;
+  application_id?: string | null;
 };
 
 export async function insertAlerts(supabase: SupabaseClient, alerts: AlertInsert[]) {
@@ -53,6 +54,7 @@ export async function insertAlerts(supabase: SupabaseClient, alerts: AlertInsert
         type: alert.type,
         ...(alertIds[index] ? { alert_id: alertIds[index] } : {}),
         ...(alert.job_id ? { job_id: alert.job_id } : {}),
+        ...(alert.application_id ? { application_id: alert.application_id } : {}),
       },
     }))
   );
@@ -148,7 +150,8 @@ export function applicationStatusAlert(
   userId: string,
   jobId: string | null,
   jobTitle: string | null,
-  status: string
+  status: string,
+  applicationId: string | null
 ): AlertInsert | null {
   if (!isKnownStatus(status)) return null;
   const content = statusContent(status, jobTitle);
@@ -156,6 +159,7 @@ export function applicationStatusAlert(
     user_id: userId,
     type: "APPLICATION_UPDATE",
     job_id: jobId,
+    application_id: applicationId,
     title: content.title,
     message: content.alert,
   };
