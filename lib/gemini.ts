@@ -8,7 +8,7 @@
 
 import type { Draft, GeneratorInput } from "@/lib/jobDescriptionGenerator";
 
-const MODEL = "gemini-3.8-flash";
+const MODEL = "gemini-3.6-flash";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 const SYSTEM_PROMPT = `You write job description sections for MR.DIY, a Philippine retail/hardware

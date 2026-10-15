@@ -10,7 +10,7 @@
  * vision input.
  */
 
-const MODEL = "gemini-3.8-flash";
+const MODEL = "gemini-3.6-flash";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 const SYSTEM_PROMPT = `You answer an applicant's question about ONE specific job posting at MR.DIY, a

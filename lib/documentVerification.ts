@@ -12,7 +12,7 @@
  * unrelated task.
  */
 
-const MODEL = "gemini-3.8-flash";
+const MODEL = "gemini-3.6-flash";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 const SYSTEM_PROMPT = `You check one uploaded applicant document image or PDF against what it is
