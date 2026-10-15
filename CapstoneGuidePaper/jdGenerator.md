@@ -114,7 +114,7 @@ Walang bagong folder — sinusunod ang existing convention (`lib/` para sa share
 
 ### Manual QA checklist — Phase 2 (i-click-through sa Jobs page)
 
-Hindi pa ito na-verify sa browser (walang browser tool sa AI session) — code-level lang ang na-check (lint + build). Ito ang dapat subukan mismo:
+Karamihan dito ay na-verify na sa browser (2026-10-15 hanggang 2026-10-16, sa deployed site mismo). Natitira na lang ang ilang item sa cold-start case at ilang detalye sa common case na hindi pa literal na na-click-through, pero code-confirmed na tama ang lahat.
 
 **Pangkaraniwang kaso (may kahawig na posting)**
 - [ ] Buksan ang "Add Job" modal, i-type ang title na **"Cashier"** → i-click ang "✨ Generate description"
@@ -123,7 +123,7 @@ Hindi pa ito na-verify sa browser (walang browser tool sa AI session) — code-l
 - [ ] May nakikitang warnings ba (dapat wala, malinis na dapat ang existing Cashier data)?
 - [ ] I-click ang "Use this draft" → napupunan ba ang Description/Responsibilities/Requirements/Benefits fields?
 - [ ] Pwede pa bang i-edit ang mga napunan na fields (hindi dapat naka-lock/disabled)?
-- [ ] I-generate mo ulit ng 2-3 pa (parehong "Cashier") → **magkaiba** ba ang "About the role" preview text bawat beses (3 posibleng template — na-ayos na ito 2026-10-15, dati iisang fixed na sentence lang)?
+- [x] I-generate mo ulit ng 2-3 pa (parehong "Cashier") → **magkaiba** ba ang "About the role" preview text bawat beses (3 posibleng template — na-ayos na ito 2026-10-15, dati iisang fixed na sentence lang)? — **✅ na-verify sa browser (2026-10-16)**
 
 **Cold-start na kaso (walang kahawig)**
 - [ ] I-type ang title na **"Veterinary Surgeon"** (o ibang klarong-wala-pang-kahawig na trabaho) → generate
@@ -134,7 +134,7 @@ Hindi pa ito na-verify sa browser (walang browser tool sa AI session) — code-l
 
 **Error handling**
 - [x] I-click ang "Generate description" nang WALANG laman ang title field → dapat lumabas ang error message na "Enter a job title first." (hindi dapat mag-crash o mag-request) — **✅ na-verify sa browser (2026-10-15)**
-- [ ] I-disable ba ang button habang "Generating…" (hindi pwedeng i-double-click)?
+- [x] I-disable ba ang button habang "Generating…" (hindi pwedeng i-double-click)? — **✅ na-verify sa browser (2026-10-16)**
 
 **Modal lifecycle**
 - [x] Mag-generate, tapos isara ang modal (Cancel) nang hindi nag-se-save → buksan ulit ang "Add Job" → blangko ba ulit ang generator result (hindi dapat may natitirang lumang resulta mula sa huling job)? — **✅ na-verify sa browser (2026-10-15)**
