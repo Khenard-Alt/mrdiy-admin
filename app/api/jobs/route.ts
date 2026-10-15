@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdminSession } from "@/lib/requireAdminSession";
 import { hasRole } from "@/lib/adminSession";
-import { notifyNewJob } from "@/lib/notifications";
+import { notifyNewJob, notifyNearMissPastApplicants } from "@/lib/notifications";
 
 function isPublished(status: string | null | undefined) {
   return (status ?? "").toLowerCase() === "published";
@@ -14,7 +14,8 @@ async function notifySafely(
   job: Parameters<typeof notifyNewJob>[1]
 ) {
   try {
-    return { notified: await notifyNewJob(supabase, job) };
+    const nearMissUserIds = await notifyNearMissPastApplicants(supabase, job);
+    return { notified: await notifyNewJob(supabase, job, nearMissUserIds) };
   } catch (error) {
     return {
       warning: `Job saved, but applicants could not be notified: ${

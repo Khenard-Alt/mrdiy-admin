@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("applicant_documents")
-    .select("id, document_name, status, document_url, remarks, updated_at")
+    .select("id, document_name, status, document_url, remarks, updated_at, ai_review")
     .eq("user_id", userId);
 
   if (error) {
@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
           remarks: null,
           fileUrl: null,
           updated_at: null,
+          ai_review: null,
         };
       }
       if (!row.document_url) return { ...row, fileUrl: null };

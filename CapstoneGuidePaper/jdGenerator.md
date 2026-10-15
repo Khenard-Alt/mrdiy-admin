@@ -133,12 +133,14 @@ Hindi pa ito na-verify sa browser (walang browser tool sa AI session) — code-l
 - [ ] I-generate mo nang 2-3 beses pare-pareho ang title → magkaiba ba ang "About the role" text at ang mga responsibilities bawat beses (hindi dapat paulit-ulit)?
 
 **Error handling**
-- [ ] I-click ang "Generate description" nang WALANG laman ang title field → dapat lumabas ang error message na "Enter a job title first." (hindi dapat mag-crash o mag-request)
+- [x] I-click ang "Generate description" nang WALANG laman ang title field → dapat lumabas ang error message na "Enter a job title first." (hindi dapat mag-crash o mag-request) — **✅ na-verify sa browser (2026-10-15)**
 - [ ] I-disable ba ang button habang "Generating…" (hindi pwedeng i-double-click)?
 
 **Modal lifecycle**
-- [ ] Mag-generate, tapos isara ang modal (Cancel) nang hindi nag-se-save → buksan ulit ang "Add Job" → blangko ba ulit ang generator result (hindi dapat may natitirang lumang resulta mula sa huling job)?
-- [ ] Mag-generate para sa Job A, tapos i-edit ang ibang existing job (Edit Job) → blangko ba ang generator panel (hindi dapat may carry-over mula kay Job A)?
+- [x] Mag-generate, tapos isara ang modal (Cancel) nang hindi nag-se-save → buksan ulit ang "Add Job" → blangko ba ulit ang generator result (hindi dapat may natitirang lumang resulta mula sa huling job)? — **✅ na-verify sa browser (2026-10-15)**
+- [x] Mag-generate para sa Job A, tapos i-edit ang ibang existing job (Edit Job) → blangko ba ang generator panel (hindi dapat may carry-over mula kay Job A)? — **✅ na-verify sa browser (2026-10-15)**
+
+**Bug nahanap bago ang browser testing (2026-10-15), naayos na bago pa na-test ng user:** `generatorResult`/`generatorError` state ay na-clear LANG dati sa `closeModal()` — hindi sa `openAddModal()`, `openEditModal()`, o sa success branch ng `handleSubmit()`. Ibig sabihin kung mag-save ka ng job pagkatapos mag-generate, o diretso mag-Edit ng ibang job habang may unsaved generator result, pwedeng magpersist ang lumang badge/draft. **Fix:** idinagdag ang parehong reset calls sa tatlong lugar na ito. Ito ang na-verify sa itaas.
 
 ### Mga bug na nahanap habang nagte-test (2026-10-15)
 

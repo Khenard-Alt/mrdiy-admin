@@ -27,16 +27,15 @@ graph LR
         GM --> H2[Layer 2 again: Guardrail] --> PUB
     end
 
-    subgraph "RESUME VALIDATOR v2 — 🔵 PLANNED (§5.6)"
-        RV[Trained classifier<br/>Logistic Regression/NB + TF-IDF] -->|low confidence| RVG[Gemini fallback]
-        RV -->|confident| RVR[Resume / Not a resume]
-        RVG --> RVR
+    subgraph "RESUME VALIDATOR v2 — ✅ DONE, advisory-only (§5.6)"
+        RVR2[Rule-based validator<br/>sections + contact + timeline + skills] -->|accept/reject, unchanged| RVOUT[Resume / Not a resume]
+        RV[Trained classifier<br/>Logistic Regression + TF-IDF] -.->|logged, never blocks| RVOUT
     end
 
-    subgraph "FUTURE DIRECTIONS — ⚪ IDEA ONLY (§6)"
-        PM[Proactive re-matching<br/>§6.1] -.-> E
-        DV[Document verification AI<br/>§6.2] -.-> GM
-        FAQ[Conversational FAQ assistant<br/>§6.3] -.-> GM
+    subgraph "FUTURE DIRECTIONS (§6)"
+        PM[Proactive re-matching<br/>✅ done, §6.1] -.-> E
+        DV[Document verification AI<br/>✅ done, §6.2] -.-> GM
+        FAQ[Conversational FAQ assistant<br/>✅ done, §6.3] -.-> GM
     end
 ```
 
@@ -255,40 +254,44 @@ Layer 4 — HR review and edit before publishing (a human always makes the final
 | Phase | What to do | Checkpoint |
 |---|---|---|
 | 1 | Layer 1 + 2 (API route in `mrdiy-admin`, no Gemini) | ✅ **Done (2026-10-15)** — lint + build + `curl` test against the real database. 4 bugs found and fixed during testing (details in `CapstoneGuidePaper/jdGenerator.md`) — wrong similarity threshold, category/level overwhelming the title, two age-limit phrasings that weren't caught. |
-| 2 | UI button + "Based on" + warnings on the Jobs page | ✅ **Code done (2026-10-15)** — lint clean, build successful. Not yet verified in the browser (no browser tool in this session), still needs to be clicked through manually. |
+| 2 | UI button + "Based on" + warnings on the Jobs page | ✅ **Code done, key items browser-verified (2026-10-15).** A real stale-state bug was found and fixed here: `generatorResult`/`generatorError` were only cleared in `closeModal()`, not in `openAddModal()`, `openEditModal()`, or `handleSubmit()`'s success path — meaning a saved/edited job could show a leftover draft from a previous job. Fixed, then verified live in the browser: empty-title error message, Cancel-then-reopen blank state, and Edit-different-job blank state all pass. Remaining checklist items (common-case/cold-start generation variety, button-disabled-while-generating) are code-confirmed but not yet clicked through — see `CapstoneGuidePaper/jdGenerator.md`. |
 | 3 | Layer 3 Gemini (cold-start handler) + guardrail | ✅ **Code done (2026-10-15), with a real key too.** A real `GEMINI_API_KEY` now exists — 3 bugs found and fixed during testing (outdated model name, overly strict prompt, no timeout). Also added: retry-on-503, and variety in the generic fallback (which had its own bug — biased random pick, fixed). We haven't yet caught one fully successful real Gemini generation due to persistent "high demand" on the free tier, but every other part has been fully verified. Details in `CapstoneGuidePaper/jdGenerator.md`. |
 
-### 5.6 Resume Validator — TRAINED MODEL as primary, Gemini as fallback (decision 2026-10-14)
+### 5.6 Resume Validator — trained model built, but kept advisory-only after real comparison (decision 2026-10-14, revised 2026-10-15)
 
-This is the best-fit candidate for training, already in scope: the **Resume Validator** (`ResumeRepository.kt`), currently rule-based only ("is this a resume or not," 4 hand-tuned-threshold signals).
+This is the best-fit candidate for training, already in scope: the **Resume Validator** (`ResumeRepository.kt`), rule-based ("is this a resume or not," 4 hand-tuned-threshold signals in `ResumeValidator.kt`).
 
-**Architecture:**
+**Originally planned architecture** (trained model primary, Gemini fallback on low confidence) — see the "To be compared" note below for why this was revised after actually running the comparison.
 
 ```
 Uploaded document (text from extraction)
         │
-PRIMARY — Own TRAINED MODEL (offline, fast, free)
-        • Binary classifier (Logistic Regression or Naive Bayes + TF-IDF)
-        • Trained in a notebook (Python/Colab) — resume dataset as positive
-          examples (any real resume counts, category doesn't matter —
-          the only question is "is this a resume," not "what kind of resume"),
-          non-resume documents (recipes, invoices, articles) as negative
-        • Weights/vocabulary exported as JSON, and the PREDICTION
-          (inference) itself is written in TypeScript — no Python server
-          runs in production
+RULE-BASED VALIDATOR (ResumeValidator.kt) — the real gate, unchanged
+        • 4 signals: section headings, contact info, timeline, skill density
         │
-FALLBACK — Gemini API
-        • Called ONLY when the own model's confidence is low
-          (e.g. <70%) or when local inference errors out
-        • Not the first thing tried — second line only
+TRAINED MODEL (ResumeMlClassifier.kt) — advisory only, logged alongside
+        • Binary classifier (Logistic Regression + TF-IDF), ported to Kotlin
+        • Runs on every upload, result logged for comparison, never blocks
         │
-Result: "Resume" or "Not a resume," with a confidence %, and a label for
-        where the decision came from ("Own model" or "Gemini fallback")
+Result: the rule-based verdict decides accept/reject, as before. The
+        trained model's verdict + confidence is logged (Logcat) so the
+        two can be compared over time without risking real applicants.
 ```
 
-**Why there's no live Python in production:** Python is only used for training (offline, Colab/notebook) — it doesn't run in the real system. After training, the simple linear model (weights + TF-IDF vocabulary) is easily translated into a TypeScript function — no need to deploy, host, or maintain a separate Python microservice. Less to maintain, simpler architecture.
+**Why there's no live Python in production:** Python is only used for training (offline, Colab/notebook) — it doesn't run in the real system. After training, the simple linear model (weights + TF-IDF vocabulary) is translated into Kotlin (`ResumeMlClassifier.kt`, ported from the exported `resume_validator_weights.json` — not TypeScript as originally planned, since the actual consumer of this check is the Android app, not the admin web) — no need to deploy, host, or maintain a separate Python microservice.
 
-**To be compared:** old (rules) vs new (trained model) on the same test set — accuracy, precision, recall, F1. This is a separate decision from the JD Generator.
+**Compared — real result, not as originally expected (2026-10-15):** old (rules) vs new (trained model), evaluated on the hand-labeled sample corpus already used by `ResumeValidatorTest.kt`/`ResumeValidationTest.kt` (short, casual, Philippine-context resumes, several with Tagalog headers) — see `mrdiyreact/app/src/test/java/com/mrdiy/careers/ValidatorComparisonTest.kt`.
+
+| | Accuracy | Precision | Recall | F1 |
+|---|---|---|---|---|
+| Rule-based (`ResumeValidator`) | 100% (11/11) | 1.00 | 1.00 | 1.00 |
+| Trained model (`ResumeMlClassifier`) | 72.7% (8/11) | 1.00 | 0.40 | 0.57 |
+
+The trained model missed 3 of 5 real resumes in this set (mobile-only contact, Tagalog headers, an IT resume mentioning "installation/wireless"), while never wrongly accepting a non-resume (precision stayed perfect). **Why:** its 99.5% F1 was measured on its own Hugging Face test split — full-length, formal, English-only professional resumes (LiveCareer) vs. news articles — a much easier and different distribution than the short, casual, Taglish-inclusive resumes real MR.D.I.Y. applicants actually submit. The model learned "long, formal, English document" as a proxy for "resume," which breaks down exactly on the kind of input this app needs to handle well.
+
+**Decision:** keep the rule-based validator as the real gate. The trained model runs advisory-only — every upload also gets classified by it, logged for comparison, but it never blocks or accepts an upload on its own. Promoting it to primary, as originally planned, would reject valid applicants that pass today. The Gemini-fallback idea for low-confidence cases is **deferred** — it's moot while the trained model isn't the primary gate, and there's no existing Android-to-backend bridge to Gemini yet anyway (Android only talks to a separate PHP backend via Retrofit; Gemini is only ever called server-side from Next.js in `mrdiy-admin`).
+
+**What would change this:** retraining on a dataset that actually resembles real applicant resumes — shorter, more casual, Taglish-inclusive — rather than LiveCareer's professional-resume corpus. Not attempted in this pass; noted as future work rather than reworked under time pressure before the defense.
 
 **Sequence (revised 2026-10-15 — files/libs prepared, but the dataset itself comes last, after research):**
 
@@ -316,7 +319,7 @@ Before training, check the dataset against this list first — this matters beca
 2. **Class imbalance** — if the count of positive (resume) and negative (not-resume) examples is far apart, the model will just learn to always answer the majority class. Keep the counts close, or look at precision/recall per class, not just overall accuracy.
 3. **Negative examples that are too easy** — if the "not a resume" examples are too obvious (e.g. random articles), the model will just learn a shortcut instead of truly understanding. Include hard/close negative examples too.
 4. **Mislabeled data (label noise)** — spot-check a sample of the dataset before using it, especially if it's a scraped/third-party source.
-5. **Distribution mismatch — specific to us** — the Kaggle dataset is English-only (LiveCareer/US), but our real applicants may write in **Taglish or heavily-localized English**. Some real Taglish/Filipino resumes need to be added to the TEST set (even a small number) to measure whether it still works for real users, not just on a purely English dataset.
+5. **Distribution mismatch — specific to us** — the Kaggle dataset is English-only (LiveCareer/US), but our real applicants may write in **Taglish or heavily-localized English**. ✅ **Tested (2026-10-15)**, confirmed as a real effect, not a hypothetical: `ValidatorComparisonTest.kt`'s held-out Taglish set (2 real Taglish resumes, 2 non-resumes) found the trained model misclassifies one of the two Taglish resumes as not-a-resume (probability 0.327, below the 0.5 threshold) — directly in line with the broader finding above that short/Taglish-inclusive resumes are outside what this training data covers well.
 
 ### 5.7 Rules that ALL AI features must follow (whether Gemini or a trained model) — decision 2026-10-14
 
@@ -339,8 +342,8 @@ Gemini has one consistent role across **all** AI features, not just the conversa
 |---|---|---|
 | **JD Generator** (§5) | TF-IDF retrieval over existing MR.DIY job postings | **Cold start** — no/few similar postings in the database (a new kind of job) |
 | **Resume Validator** (§5.6) | Trained binary classifier (Logistic Regression/Naive Bayes + TF-IDF) | **Low confidence** — the own model isn't sure whether it's a resume or not |
-| **Document verification** (§6.2, not yet built) | — (no current automated check) | **The whole task** — no own vision/OCR model, so Gemini Vision itself does the document reading, always with a guardrail (format check, expiry parsing) |
-| **FAQ assistant** (§6.3, not yet built) | Existing job/requirement data as context | **Natural-language questions** — not a structured query, so a conversational layer over the structured data is needed |
+| **Document verification** (§6.2, ✅ done) | — (no own vision/OCR model) | **The whole task** — Gemini Vision does the document reading itself (name match, expiry, document-type check), but HR always makes the real Verify/Send-back decision — the AI result is advisory-only, never auto-acted on |
+| **FAQ assistant** (§6.3, ✅ done) | A single job posting's own data as context | **Natural-language questions** — not a structured query, so a conversational layer over that one job's data is needed; scoped to public job content only, never personal application data |
 
 **The pattern:** database/own ML first (fast, free, explainable) → Gemini only when there's a real gap it can't cover — cold start, low confidence, no existing automated check, or natural-language input. This isn't "AI just so AI runs" — there's a specific reason it runs in each case, and the reason is always documented (§5.7B, traceable sources).
 
@@ -350,19 +353,42 @@ Gemini has one consistent role across **all** AI features, not just the conversa
 
 Options discussed for further expanding the system's AI, beyond the JD Generator (§5) and Resume Validator (§5.6). No code yet; listed only as options.
 
-**6.1 Proactive re-matching (easiest, safest — recommended first)**
+**6.1 Proactive re-matching — ✅ Done (2026-10-15)**
 
-- When a new job posting is created, scan PAST applicants who were close to the match threshold but weren't hired (not due to lacking skills, but due to branch/timing) — send them a notification: "A new Cashier opening is available in Cainta, might suit you."
-- **No new model.** Just uses the existing TF-IDF + cosine engine (`lib/matching.ts`) in a different direction — job-to-past-applicants instead of resume-to-jobs. A pure "trigger/notify" layer on top of the ML that already exists.
+When a new job posting is published, past applicants who were a decent fit for a similar role before but weren't hired for a reason unrelated to skill (wrong branch, old posting closed/expired) get a notification: *"You were a strong candidate for a similar [Category] role before — [Job Title] just opened, might be a better fit."*
 
-**6.2 Document verification AI (biggest addition, new dependency)**
+**No new model** — `notifyNearMissPastApplicants()` (new, in `lib/notifications.ts`) reuses the exact same TF-IDF + cosine engine (`lib/matching.ts`) and the same `JOB_MATCH_THRESHOLD` that `notifyNewJob()` already used for its "matches your profile" blast — just pointed at a narrower, more relevant audience: people who already applied for something similar, re-scored fresh against the new job.
 
-- Currently, HR verification of uploaded NBI Clearance/SSS/Valid ID is still manual (just looking at the photo). Using vision/OCR AI (Gemini Vision), the document's content would be read automatically — checking if the name matches the profile, if it's expired, if the details are complete.
-- A new modality (images, not just text) — real time savings for HR, but a new external dependency (vision API) that must follow the same rules in §5.7 (scoped prompt + traceable basis, e.g. "this is where the expiry date was read from").
+**How "branch/timing, not skill" is inferred:** there's no stored rejection-reason in `applications`, so this is a heuristic, not a read of HR's actual reasoning — an old application with status `Rejected` or `On Hold`, for a job in the same `category`, where the old job's `branch_id` differs from the new one's, or the old posting is no longer open (closed/deadline passed). Documented as an inference, not a certainty.
 
-**6.3 Conversational assistant for applicant FAQs**
+**No double-alerting:** `notifyNewJob()` now takes an `excludeUserIds` set; the jobs API route runs `notifyNearMissPastApplicants()` first and passes its matched user IDs in, so nobody gets both the personalized near-miss alert and the generic "new job published"/"matches your profile" alert for the same posting.
 
-- A chatbot that answers questions about a job posting or the application process, using existing job/requirement data as context (grounded, not free-form chat — same rule as §5.7A).
-- An extension of the Gemini layer, but for the applicant side this time instead of the admin side.
+**Files touched:** `lib/notifications.ts` (new `RECOMMENDED_JOB` alert type, new function, `excludeUserIds` param on `notifyNewJob`), `app/api/jobs/route.ts` (`notifySafely` now calls both, same error-swallowing pattern — a notification failure still never blocks saving a job). No Android changes needed — `alerts.job_id` deep-linking already existed. No DB migration — no new columns.
+
+Verified: `npm run lint` (0 errors), `npm run build` (compiles, type-checks), and a live end-to-end test against the real dev database (2026-10-15) — a disposable test applicant, a Rejected application for an old job in Antipolo, and a newly-published job in the same category in Cainta, all deleted immediately after. **Found and fixed one real bug in the process:** the first version queried `applications` with a PostgREST embedded join (`jobs!inner(...)`) to pull the old job's category/branch in one call — this codebase has no FK relationship registered in Supabase's schema cache for `applications.job_id` → `jobs.id` (confirmed: every other route in the app joins jobs/applications manually in two queries, never via embedding), so it failed with "Could not find a relationship between 'applications' and 'jobs'." Fixed by switching to the same two-query-then-join-in-JS pattern already used everywhere else. After the fix, the live test produced exactly the intended `RECOMMENDED_JOB` alert ("You were a strong candidate for a similar Sales role before — ...") for the test applicant, with no duplicate generic alert for them, while the dedupe/exclude-set behavior worked correctly.
+
+**6.2 Document verification AI — ✅ Done (2026-10-15)**
+
+HR can click **"🔎 Check with AI"** next to any uploaded-but-undecided document (Valid ID, NBI Clearance, SSS, etc.) in either `ProfileDocumentsPanel.tsx` (profile-level documents) or `RequirementsPanel.tsx` (per-application pre-employment checklist). Gemini Vision reads the document image/PDF and reports whether it looks like the claimed document type, whether the visible name matches the applicant's profile, and whether a visible expiry date has passed — shown as a one-line advisory note next to the existing manual Verify/Send-back buttons. **It never auto-verifies or auto-rejects anything** — HR always makes the real decision (§5.7B).
+
+**New, separate file (`lib/documentVerification.ts`), not an extension of `lib/gemini.ts`:** per §5.7A, every AI call gets its own narrow scope — `lib/gemini.ts` is specifically the JD Generator's cold-start text handler and only sent text parts; this is an unrelated task (vision input), so it got its own system prompt and its own `analyzeDocument()` function, reusing only the low-level fetch/timeout/retry-once-on-503 pattern `lib/gemini.ts` already established. The request adds an `inline_data: { mime_type, data: base64 }` part alongside the text prompt — Gemini's existing `generateContent` endpoint already accepts this, so it was additive, not a rewrite.
+
+**On-demand, not automatic on upload:** HR triggers the check themselves (same reasoning as the JD Generator's Gemini layer — not the first thing tried, and never slows down the ordinary upload flow). The result is cached in a new nullable `ai_review jsonb` column (migration `202610150001_document_ai_review.sql`, added to both `applicant_documents` and `pre_employment_requirements` — no destructive change, both tables already shared the same verify/reject shape).
+
+**New endpoints:** `POST /api/applicant-documents/ai-check` and `POST /api/requirements/ai-check` — two thin routes (consistent with the existing one-route-per-feature split rather than one shared parameterized route), each: downloads the file via `supabase.storage.from(bucket).download(path)` (same pattern as `lib/resumeText.ts`'s resume reading, not the signed-URL pattern — that one's for browser links only), sniffs the mime type from magic bytes (PDF/JPEG/PNG), looks up the applicant's `full_name`, calls `analyzeDocument()`, and writes the result into `ai_review`. Never throws on a Gemini failure — same "AI check unavailable" non-blocking fallback already established for the JD Generator.
+
+**Verified live (2026-10-15):** `npm run lint`/`npm run build` both clean, plus an end-to-end test against the real dev database using a disposable test applicant and a synthetic test "NBI Clearance" image (generated with Pillow) — deliberately with a name that didn't match the profile ("ZZZ TEST APPLICANT" on the document vs. "Pedro Reyes" in the profile) and an expiry date in the past, uploaded to the real `applicant-documents` bucket, then deleted immediately after. The AI check correctly flagged all three things: `looksValid: false` ("lacking official NBI clearance features and layout"), `nameMatches: false`, `expired: true` — a coherent one-sentence `reasoning` matched the test setup exactly.
+
+**6.3 Conversational assistant for applicant FAQs — ✅ Done, pending one config value (2026-10-15)**
+
+A "💬 Ask a question" button on the Android app's job detail screen (`JobDetailFragment.kt`) opens a bottom sheet (`FaqChatBottomSheetFragment.kt`) where an applicant can ask about that specific job or the application process. Each question is answered fresh and grounded only in that job's own title/description/responsibilities/requirements/benefits — no multi-turn memory kept client- or server-side, keeping the "grounded, not free-form chat" rule (§5.7A) simple and honest.
+
+**A new architectural precedent — the first-ever Android-to-mrdiy-admin bridge.** Every prior Android network call goes to a separate, externally-hosted PHP backend (`mrd-i-y-careers.onrender.com`, not in either repo, not editable here); every existing `mrdiy-admin` route requires `requireAdminSession`, which an applicant request can't satisfy. This feature adds `mrdiy-admin/app/api/public/faq-chat/route.ts` — a **public, unauthenticated** endpoint, deliberately scoped to read-only, non-personal data only (a published job posting's own public fields; never a specific applicant's account or application status, since there's no way to verify identity on an unauthenticated request). A basic in-memory per-IP rate limit (10 requests / 5 minutes) guards against abuse of this public, Gemini-backed endpoint — explicitly a best-effort guard (resets on redeploy, doesn't coordinate across multiple server instances), not a production-grade abuse-prevention system; an accepted, documented limitation for a capstone demo, not something hidden.
+
+**New file `lib/faqAssistant.ts`**, separate from `lib/gemini.ts` and `lib/documentVerification.ts` per §5.7A (every AI call gets its own narrow scope) — its own system prompt, refusing anything outside this one job's content or the general application process, including explicitly refusing personal/account-specific questions it has no way to actually answer. Same low-level request pattern as the other two: `AbortSignal.timeout(25_000)`, retry once on 503.
+
+**Android side:** new `network/FaqApiService.kt` + a second Retrofit client `network/AdminRetrofitClient.kt` (separate from the existing PHP-backend `RetrofitClient.kt` — different host). **One config value still needed:** `AdminRetrofitClient.BASE_URL` is currently a placeholder (`REPLACE_WITH_DEPLOYED_MRDIY_ADMIN_URL`) — requests will fail until it's filled in with the real deployed `mrdiy-admin` URL.
+
+**Verified (2026-10-15):** `npm run lint`/`npm run build` both clean. Live-tested the new endpoint's logic against the real dev server: the per-IP rate limiter was confirmed correct (tripped exactly at the 10-request boundary across a burst of calls). A full successful grounded-answer demo was blocked by the Gemini free-tier's daily quota being exhausted from this session's earlier testing (confirmed via a direct call to Gemini's API returning the same `429 RESOURCE_EXHAUSTED`, independent of this app's code) — the error-handling path itself returned the correct `{"ok":false,"reason":"error"}` shape, matching the same non-blocking-fallback convention already used by the JD Generator and document verification. A full answer/refusal demo is still owed once the quota resets. The Android UI/flow has not been run (no JDK on this machine, confirmed earlier in this session) — the user verifies it themselves once the real base URL is filled in.
 
 **Suggested order:** 6.1 first (no new dependency, quick to demo), then 6.2 if a "weightier" AI feature is wanted for the defense, 6.3 if there's still time.

@@ -4,6 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 
 type DocStatus = "Pending" | "Uploaded" | "Verified" | "Rejected";
 
+type AiReview = {
+  checkedAt: string;
+  result:
+    | { ok: true; verdict: { looksValid: boolean; nameMatches: boolean | "unclear"; expired: boolean | "unclear"; reasoning: string } }
+    | { ok: false; reason: string };
+};
+
 type Document = {
   id: string | null;
   document_name: string;
@@ -12,7 +19,27 @@ type Document = {
   remarks: string | null;
   fileUrl: string | null;
   updated_at: string | null;
+  ai_review: AiReview | null;
 };
+
+/**
+ * One-line advisory note from the §6.2 AI check — informational only, next to the
+ * existing manual Verify/Send-back buttons. Never gates or auto-fills them.
+ */
+function AiReviewNote({ aiReview }: { aiReview: AiReview | null }) {
+  if (!aiReview) return null;
+  if (!aiReview.result.ok) {
+    return <p className="mt-1 text-xs text-slate-400">AI check unavailable — review manually.</p>;
+  }
+  const { verdict } = aiReview.result;
+  const flagged = !verdict.looksValid || verdict.nameMatches === false || verdict.expired === true;
+  return (
+    <p className={`mt-1 text-xs ${flagged ? "font-semibold text-amber-700" : "text-slate-500"}`}>
+      {flagged ? "⚠️ AI check: " : "AI check: "}
+      {verdict.reasoning}
+    </p>
+  );
+}
 
 const STATUS_STYLE: Record<DocStatus, string> = {
   Pending: "border-slate-200 bg-slate-50 text-slate-500",
@@ -61,6 +88,26 @@ export default function ProfileDocumentsPanel({ userId }: { userId: string }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  async function checkWithAi(row: Document) {
+    if (!row.id) return;
+    setBusy(row.id);
+    setError("");
+    try {
+      const response = await fetch("/api/applicant-documents/ai-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: row.id }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not run the AI check.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not run the AI check.");
+    } finally {
+      setBusy("");
+    }
+  }
 
   async function review(row: Document, action: "verify" | "reject") {
     if (!row.id) return;
@@ -131,6 +178,7 @@ export default function ProfileDocumentsPanel({ userId }: { userId: string }) {
                   View uploaded document
                 </a>
               )}
+              <AiReviewNote aiReview={row.ai_review} />
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -139,6 +187,14 @@ export default function ProfileDocumentsPanel({ userId }: { userId: string }) {
               </span>
               {row.document_url && row.status !== "Verified" && (
                 <>
+                  <button
+                    type="button"
+                    disabled={busy === row.id}
+                    onClick={() => checkWithAi(row)}
+                    className="border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    🔎 Check with AI
+                  </button>
                   <button
                     type="button"
                     disabled={busy === row.id}

@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { REQUIREMENT_DUE_DAYS } from "@/lib/pipeline";
 
+type AiReview = {
+  checkedAt: string;
+  result:
+    | { ok: true; verdict: { looksValid: boolean; nameMatches: boolean | "unclear"; expired: boolean | "unclear"; reasoning: string } }
+    | { ok: false; reason: string };
+};
+
 type Requirement = {
   id: string;
   requirement_name: string;
@@ -12,7 +19,27 @@ type Requirement = {
   fileUrl: string | null;
   created_at: string;
   updated_at: string;
+  ai_review: AiReview | null;
 };
+
+/**
+ * One-line advisory note from the §6.2 AI check — informational only, next to the
+ * existing manual Verify/Send-back buttons. Never gates or auto-fills them.
+ */
+function AiReviewNote({ aiReview }: { aiReview: AiReview | null }) {
+  if (!aiReview) return null;
+  if (!aiReview.result.ok) {
+    return <p className="mt-1 text-xs text-slate-400">AI check unavailable — review manually.</p>;
+  }
+  const { verdict } = aiReview.result;
+  const flagged = !verdict.looksValid || verdict.nameMatches === false || verdict.expired === true;
+  return (
+    <p className={`mt-1 text-xs ${flagged ? "font-semibold text-amber-700" : "text-slate-500"}`}>
+      {flagged ? "⚠️ AI check: " : "AI check: "}
+      {verdict.reasoning}
+    </p>
+  );
+}
 
 /** Days left (negative once overdue) until this requirement's follow-up deadline, or null if it has none. */
 function daysUntilDue(row: Requirement): number | null {
@@ -60,6 +87,25 @@ export default function RequirementsPanel({ applicationId }: { applicationId: st
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  async function checkWithAi(row: Requirement) {
+    setBusy(row.id);
+    setError("");
+    try {
+      const response = await fetch("/api/requirements/ai-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: row.id }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not run the AI check.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not run the AI check.");
+    } finally {
+      setBusy("");
+    }
+  }
 
   async function review(row: Requirement, action: "verify" | "reject") {
     let remarks = "";
@@ -137,6 +183,7 @@ export default function RequirementsPanel({ applicationId }: { applicationId: st
                   View uploaded document
                 </a>
               )}
+              <AiReviewNote aiReview={row.ai_review} />
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -164,6 +211,14 @@ export default function RequirementsPanel({ applicationId }: { applicationId: st
               })()}
               {row.document_url && row.status !== "Verified" && (
                 <>
+                  <button
+                    type="button"
+                    disabled={busy === row.id}
+                    onClick={() => checkWithAi(row)}
+                    className="border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    🔎 Check with AI
+                  </button>
                   <button
                     type="button"
                     disabled={busy === row.id}
